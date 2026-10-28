@@ -9,7 +9,7 @@ import { GeminiChatbot } from './components/GeminiChatbot';
 import { PersonalReportModal } from './components/PersonalReportModal';
 import { DataManagement } from './components/DataManagement';
 import { ProcessSettings } from './components/ProcessSettings';
-import { PWAInstallButton, OfflineIndicator } from './components/AndroidAppModal';
+import { PWAInstallButton, UserSettingsButton, OfflineIndicator } from './components/AndroidAppModal';
 import { SCHEDULE_DATA, INITIAL_PERSONNEL } from './constants';
 import { INITIAL_STAFF, generateNextMonth, getDaysInPersianMonth, validateSwap } from './utils/scheduler';
 import { ShiftEntry, Personnel, AppData, PublishedRange, DailyProcessMap, ProcessDefinition } from './types';
@@ -1770,8 +1770,18 @@ const App: React.FC = () => {
                 </div>
               )}
 
-              {/* Android / Mobile App Install Button */}
+              {/* Android / Mobile App Latest Release Button */}
               <PWAInstallButton schedule={schedule} />
+
+              {/* User Settings & Smart Shift Notification Center (For All Users) */}
+              <UserSettingsButton
+                schedule={schedule}
+                personnelList={personnelList}
+                dailyProcesses={dailyProcesses}
+                currentMonthName={currentMonth.name}
+                currentYear={currentYear}
+                currentMonthCode={currentMonth.code}
+              />
 
               {/* AI Assistant Toggle for Manager */}
               {isOwner && (

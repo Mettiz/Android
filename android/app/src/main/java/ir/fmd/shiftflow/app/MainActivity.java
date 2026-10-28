@@ -1,10 +1,14 @@
 package ir.fmd.shiftflow.app;
 
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.print.PrintAttributes;
@@ -318,6 +322,38 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void saveBase64File(String base64Data, String fileName, String mimeType) {
             activity.runOnUiThread(new SaveFileTask(activity, base64Data, fileName));
+        }
+
+        @JavascriptInterface
+        public void showNotification(final String title, final String message) {
+            activity.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        NotificationManager nm = (NotificationManager) activity.getSystemService(Context.NOTIFICATION_SERVICE);
+                        if (nm == null) return;
+                        String channelId = "shiftflow_alerts";
+                        Notification.Builder builder;
+                        if (Build.VERSION.SDK_INT >= 26) {
+                            NotificationChannel channel = new NotificationChannel(
+                                    channelId,
+                                    "اعلان‌های شیفت تولید FMD",
+                                    NotificationManager.IMPORTANCE_HIGH
+                            );
+                            nm.createNotificationChannel(channel);
+                            builder = new Notification.Builder(activity, channelId);
+                        } else {
+                            builder = new Notification.Builder(activity);
+                        }
+                        builder.setContentTitle(title != null ? title : "ShiftFlow FMD")
+                                .setContentText(message != null ? message : "")
+                                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                                .setAutoCancel(true);
+                        nm.notify((int) (System.currentTimeMillis() & 0xfffffff), builder.build());
+                    } catch (Exception ignored) {
+                    }
+                }
+            });
         }
     }
 
