@@ -1,0 +1,43 @@
+{
+  "entities": {
+    "RosterState": {
+      "title": "RosterState",
+      "description": "Full roster state including schedule, personnel list, unlocked months, published range, and manager credentials",
+      "type": "object",
+      "properties": {
+        "schedule": {
+          "type": "array",
+          "description": "List of shift entries for personnel across dates"
+        },
+        "personnelList": {
+          "type": "array",
+          "description": "List of registered personnel"
+        },
+        "unlockedMonths": {
+          "type": "array",
+          "description": "Months unlocked for editing (YYYY/MM)"
+        },
+        "publishedRange": {
+          "type": "object",
+          "description": "Designated published date range visible to viewers"
+        },
+        "adminPassword": {
+          "type": "string",
+          "description": "Hashed or configured administrator management password"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["updatedAt"]
+    }
+  },
+  "firestore": {
+    "/roster_state/{docId}": {
+      "schema": "#/entities/RosterState",
+      "description": "Collection storing the real-time application roster states"
+    }
+  }
+}

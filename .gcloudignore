@@ -1,0 +1,10 @@
+.gcloudignore
+.git
+.gitignore
+node_modules/
+dist/
+dist-ssr/
+data/
+*.log
+bun.lock
+bun.lockb

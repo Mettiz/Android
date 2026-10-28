@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "ir.fmd.shiftflow.app",
+        "sha256_cert_fingerprints": ["26:D3:18:69:9D:99:B3:27:59:47:1D:64:AD:F4:18:6C:05:D7:BE:07:4A:23:42:C3:C2:40:B8:83:FB:FE:30:C3"]
+      }
+    }]

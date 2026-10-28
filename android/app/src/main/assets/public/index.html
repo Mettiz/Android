@@ -1,0 +1,241 @@
+
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Suppress benign WebSocket / Vite HMR connection notices in iFrame environment
+      (function() {
+        var NativeWS = window.WebSocket;
+        if (NativeWS) {
+          var SafeWS = function(url, protocols) {
+            var isViteHmr =
+              (typeof url === 'string' && (url.indexOf('token=') !== -1 || url.indexOf('vite') !== -1)) ||
+              protocols === 'vite-hmr' ||
+              (Array.isArray(protocols) && protocols.indexOf('vite-hmr') !== -1);
+            if (isViteHmr) {
+              return {
+                url: String(url || ''),
+                readyState: 3,
+                protocol: 'vite-hmr',
+                extensions: '',
+                bufferedAmount: 0,
+                binaryType: 'blob',
+                send: function() {},
+                close: function() {},
+                addEventListener: function() {},
+                removeEventListener: function() {},
+                dispatchEvent: function() { return false; }
+              };
+            }
+            return protocols !== undefined ? new NativeWS(url, protocols) : new NativeWS(url);
+          };
+          SafeWS.CONNECTING = 0;
+          SafeWS.OPEN = 1;
+          SafeWS.CLOSING = 2;
+          SafeWS.CLOSED = 3;
+          SafeWS.prototype = NativeWS.prototype;
+          try { window.WebSocket = SafeWS; } catch (e) {}
+        }
+
+        var isWsError = function(msg) {
+          return msg && (
+            msg.indexOf('WebSocket') !== -1 ||
+            msg.indexOf('createWebSocketModuleRunnerTransport') !== -1 ||
+            msg.indexOf('@vite/client') !== -1
+          );
+        };
+        window.addEventListener('error', function(e) {
+          if (isWsError(e.message) || isWsError(e.filename)) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return true;
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function(e) {
+          var reason = e.reason && (e.reason.message || String(e.reason));
+          if (isWsError(reason)) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+          }
+        }, true);
+
+        // Register clean PWA Service Worker and remove any Vite dev-sw module worker
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', function() {
+            navigator.serviceWorker.getRegistrations().then(function(regs) {
+              regs.forEach(function(reg) {
+                if (reg.active && reg.active.scriptURL && reg.active.scriptURL.indexOf('dev-sw') !== -1) {
+                  reg.unregister();
+                }
+              });
+            }).catch(function() {});
+            navigator.serviceWorker.register('/sw.js').catch(function() {});
+          });
+        }
+      })();
+    </script>
+    
+    <!-- Production & PWA Meta Tags -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@100..900&display=swap" rel="stylesheet">
+    <style>
+      * {
+        font-synthesis: none !important;
+      }
+    </style>
+    <meta name="theme-color" content="#065f46" />
+    <meta name="app-version" content="1.0.2" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="ShiftFlow" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <meta name="description" content="A digital shift management system visualizing production schedules with fairness analysis and weighted hour tracking." />
+    <meta property="og:title" content="FMD Production Shift Flow 1405 with Process" />
+    <meta property="og:description" content="A digital shift management system visualizing production schedules with fairness analysis and weighted hour tracking." />
+
+    <title>FMD Production Shift Flow 1405 with Process</title>
+    <script src="/tailwind.min.js"></script>
+    <script>
+      // Native Android Bridge Integration for Print/PDF & Excel/JSON File Downloads
+      (function() {
+        window.addEventListener('DOMContentLoaded', function() {
+          if (window.AndroidBridge) {
+            // 1. Native Android Print / Save-as-PDF
+            var origPrint = window.print;
+            window.print = function() {
+              try {
+                window.AndroidBridge.printPage(document.title || 'ShiftFlow-FMD-1405');
+              } catch (e) {
+                if (origPrint) origPrint.call(window);
+              }
+            };
+
+            // 2. Intercept <a download="..."> for Blob & Data URLs (Excel .xlsx & JSON exports)
+            var origClick = HTMLAnchorElement.prototype.click;
+            HTMLAnchorElement.prototype.click = function() {
+              var href = this.getAttribute('href') || this.href || '';
+              var downloadName = this.getAttribute('download') || '';
+              if (downloadName && (href.indexOf('blob:') === 0 || href.indexOf('data:') === 0)) {
+                if (href.indexOf('data:') === 0) {
+                  var parts = href.split(',');
+                  var meta = parts[0] || '';
+                  var base64 = parts[1] || '';
+                  var mimeMatch = meta.match(/data:([^;]+)/);
+                  var mime = (mimeMatch && mimeMatch[1]) || 'application/octet-stream';
+                  window.AndroidBridge.saveBase64File(base64, downloadName, mime);
+                  return;
+                }
+                fetch(href)
+                  .then(function(res) { return res.blob(); })
+                  .then(function(blob) {
+                    var reader = new FileReader();
+                    reader.onloadend = function() {
+                      var result = String(reader.result || '');
+                      var base64 = result.split(',')[1] || '';
+                      window.AndroidBridge.saveBase64File(
+                        base64,
+                        downloadName,
+                        blob.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                      );
+                    };
+                    reader.readAsDataURL(blob);
+                  })
+                  .catch(function() {
+                    origClick.apply(this, arguments);
+                  });
+                return;
+              }
+              return origClick.apply(this, arguments);
+            };
+          }
+        });
+      })();
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@100;300;400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+      body {
+        font-family: 'Vazirmatn', sans-serif;
+        background-color: #f3f4f6;
+      }
+      
+      /* Print Styles - Optimized for Full Page A4 */
+      @media print {
+        @page {
+          size: A4 portrait;
+          margin: 3mm 4mm !important;
+        }
+
+        html, body {
+          width: 100% !important;
+          height: auto !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          background-color: white !important;
+          color: black !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          overflow: visible !important;
+        }
+
+        /* --- Global Print Hides --- */
+        .no-print, 
+        .main-navbar,
+        .print-hidden,
+        .print\:hidden {
+          display: none !important;
+        }
+
+        /* --- MODAL PRINT MODE --- */
+        body.print-mode-modal #root {
+          display: none !important;
+        }
+
+        body.print-mode-modal #modal-root {
+          display: block !important;
+          position: absolute !important;
+          top: 0 !important;
+          left: 0 !important;
+          right: 0 !important;
+          width: 100% !important;
+          height: auto !important;
+          background: white !important;
+          z-index: 99999 !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          overflow: visible !important;
+        }
+
+        /* Ensure table rows do not break mid-row across pages */
+        tr {
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
+        }
+        
+        /* General Table Styles for Print */
+        table {
+          width: 100% !important;
+          border-collapse: collapse !important;
+        }
+      }
+    </style>
+  <script type="module" crossorigin src="/assets/index-DJAqZOd2.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/icons-DUktxp8s.js">
+  <link rel="modulepreload" crossorigin href="/assets/recharts-vendor-DvQCXVsj.js">
+  <link rel="modulepreload" crossorigin href="/assets/xlsx-vendor-BBWTpfDg.js">
+  <link rel="modulepreload" crossorigin href="/assets/firebase-vendor-BWi4Xila.js">
+  <link rel="stylesheet" crossorigin href="/assets/index-CehtOLVh.css">
+<link rel="manifest" href="/manifest.webmanifest"></head>
+  <body>
+    <div id="root"></div>
+    <div id="modal-root"></div>
+  </body>
+</html>

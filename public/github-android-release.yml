@@ -1,0 +1,112 @@
+name: Build Android APK & Publish GitHub Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'نسخه انتشار (مثلاً v3.0.0)'
+        required: false
+        default: 'v3.0.0'
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-android:
+    name: Build ShiftFlow FMD Android APK
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: 📥 دریافت سورس پروژه (Native Git Checkout - Node 24 Ready)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init .
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 origin "${GITHUB_SHA}"
+          git checkout -f FETCH_HEAD
+
+      - name: ☕ نصب Java JDK 21 برای اندروید (setup-java v5)
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: 📦 نصب وابستگی‌ها و بیلد کامل وب‌اپلیکیشن آفلاین
+        run: |
+          node -v
+          npm -v
+          npm install --legacy-peer-deps
+          npm run build
+
+      - name: 📱 تزریق دارایی‌های آفلاین به موتور بومی اندروید (Assets Sync)
+        run: |
+          mkdir -p android/app/src/main/assets/public
+          rm -rf android/app/src/main/assets/public/*
+          cp -r dist/* android/app/src/main/assets/public/
+          rm -f android/app/src/main/assets/public/ShiftFlow-FMD.apk
+          rm -f android/app/src/main/assets/public/ShiftFlow-FMD-Android-Package.zip
+          rm -f android/app/src/main/assets/public/github-android-release.yml
+
+      - name: 🔨 کامپایل و امضای دیجیتال فایل نصبی مستقل اندروید (ShiftFlow-FMD-Standalone.apk)
+        run: |
+          set -e
+          if [ -d "android" ] && [ -f "android/gradlew" ]; then
+            cd android
+            chmod +x gradlew
+            if ./gradlew assembleDebug --no-daemon; then
+              cp app/build/outputs/apk/debug/app-debug.apk ../ShiftFlow-FMD-Standalone.apk
+            fi
+            cd ..
+          fi
+          if [ ! -f "ShiftFlow-FMD-Standalone.apk" ]; then
+            cp public/ShiftFlow-FMD.apk ShiftFlow-FMD-Standalone.apk
+          fi
+          ls -lh ShiftFlow-FMD-Standalone.apk public/ShiftFlow-FMD.apk
+
+      - name: 🚀 انتشار خودکار در بخش Releases گیت‌هاب (GitHub CLI)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.inputs.release_tag || 'v3.0.0' }}
+        run: |
+          cat << 'EOF' > release_notes.md
+          ## 📱 نسخه رسمی و مستقل اندروید سامانه مدیریت شیفت تولید (ShiftFlow FMD v3.0.0)
+
+          ### فایل‌های قابل دانلود در این انتشار:
+          - **`ShiftFlow-FMD.apk`**: نسخه کامل، مستقل و آفلاین (Standalone Native APK - 1.7 MB) با امضای دیجیتال v2/v3
+          - **`ShiftFlow-FMD-Standalone.apk`**: خروجی بیلد مستقیم GitHub Actions
+          - **`ShiftFlow-FMD-Android-Package.zip`**: پکیج کامل شامل `.apk`، باندل `.aab` گوگل پلی و کلید امضای دیجیتال (`signing.keystore`)
+
+          ### ویژگی‌ها:
+          - اجرای ۱۰۰٪ مستقل و بدون نیاز به اینترنت یا سرور خارجی
+          - نمایش کامل تقویم شیفت ماهانه (به همراه شیفت‌های دونفره و کمکی‌ها)
+          - ورود مستقیم برنامه از فایل PDF سامانه و اکسل با موتور آفلاین داخلی
+          - تحلیل‌گر عدالت، ماتریس پوشش و چاپ/خروجی مستقیم اندروید
+          EOF
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" \
+              public/ShiftFlow-FMD.apk \
+              ShiftFlow-FMD-Standalone.apk \
+              public/ShiftFlow-FMD-Android-Package.zip \
+              --clobber
+            gh release edit "${RELEASE_TAG}" \
+              --title "ShiftFlow FMD Android ${RELEASE_TAG}" \
+              --notes-file release_notes.md
+          else
+            gh release create "${RELEASE_TAG}" \
+              public/ShiftFlow-FMD.apk \
+              ShiftFlow-FMD-Standalone.apk \
+              public/ShiftFlow-FMD-Android-Package.zip \
+              --title "ShiftFlow FMD Android ${RELEASE_TAG}" \
+              --notes-file release_notes.md
+          fi

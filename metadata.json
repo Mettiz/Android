@@ -1,0 +1,8 @@
+{
+  "name": "FMD Production Shift Flow 1405 with Process",
+  "description": "A digital shift management system visualizing production schedules with fairness analysis and weighted hour tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

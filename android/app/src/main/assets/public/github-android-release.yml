@@ -1,0 +1,98 @@
+name: Build Android APK & Publish GitHub Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'نسخه انتشار (مثلاً v2.5.0)'
+        required: false
+        default: 'v2.5.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: Build ShiftFlow FMD Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 دریافت سورس پروژه (Checkout)
+        uses: actions/checkout@v4
+
+      - name: 🟢 نصب Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: ☕ نصب Java JDK 21 برای اندروید
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: 🤖 راه‌اندازی Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 📦 نصب وابستگی‌ها و بیلد وب‌اپلیکیشن
+        run: |
+          npm install --legacy-peer-deps
+          npm run build
+
+      - name: 📱 ساخت پروژه بومی اندروید با Capacitor
+        run: |
+          npm install @capacitor/core @capacitor/cli @capacitor/android --no-save --legacy-peer-deps
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: 🔨 کامپایل فایل نصبی اندروید (Gradle Assemble)
+        working-directory: ./android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk ../ShiftFlow-FMD-Capacitor.apk
+
+      - name: 📤 آپلود فایل APK در Artifacts گیت‌هاب
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShiftFlow-FMD-Android-APK
+          path: |
+            ShiftFlow-FMD-Capacitor.apk
+            public/ShiftFlow-FMD.apk
+            public/ShiftFlow-FMD-Android-Package.zip
+
+      - name: 🚀 انتشار خودکار در بخش Releases گیت‌هاب (مشابه FoxyVPN)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_tag || 'v2.5.0-latest' }}
+          name: "ShiftFlow FMD Android ${{ github.event.inputs.release_tag || 'v2.5.0' }}"
+          body: |
+            ## 📱 نسخه رسمی اندروید سامانه مدیریت شیفت تولید (ShiftFlow FMD)
+            
+            ### فایل‌های قابل دانلود در این انتشار:
+            - **`ShiftFlow-FMD.apk`**: نسخه امضاشده (Signed Release) متصل به سرور ابری با قابلیت همگام‌سازی زنده و اعلان‌ها
+            - **`ShiftFlow-FMD-Capacitor.apk`**: نسخه کامپایل‌شده با موتور بومی Capacitor/Gradle
+            - **`ShiftFlow-FMD-Android-Package.zip`**: پکیج کامل شامل `.apk`، باندل `.aab` گوگل پلی و کلید امضای دیجیتال (`signing.keystore`)
+            
+            ### ویژگی‌ها:
+            - نمایش کامل تقویم شیفت ماهانه (به همراه شیفت‌های دونفره و کمکی‌ها)
+            - ورود مستقیم برنامه از فایل PDF سامانه
+            - تحلیل‌گر عدالت و ساعات کاری وزنی
+            - کارکرد آفلاین و همگام‌سازی خودکار
+          draft: false
+          prerelease: false
+          files: |
+            public/ShiftFlow-FMD.apk
+            ShiftFlow-FMD-Capacitor.apk
+            public/ShiftFlow-FMD-Android-Package.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

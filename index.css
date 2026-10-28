@@ -1,0 +1,88 @@
+/* ShiftFlow Global Styles - v1.0.1 */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    direction: rtl;
+    font-family: 'Vazirmatn', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  body {
+    @apply bg-slate-100 text-slate-900 antialiased;
+    font-feature-settings: "tnum";
+  }
+}
+
+/* Custom smooth scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Printable styles */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 5mm !important;
+  }
+  .no-print, .print\:hidden {
+    display: none !important;
+  }
+  
+  /* Ensure dashboard print fits on 1 page */
+  body.print-mode-dashboard {
+    font-size: 11px !important;
+    background: white !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  
+  body.print-mode-dashboard .dashboard-container {
+    padding: 0 !important;
+  }
+  
+  body.print-mode-dashboard .app-wrapper {
+    padding-bottom: 0 !important;
+  }
+  
+  body.print-mode-dashboard .main-content {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    margin-top: 0 !important;
+  }
+
+  /* Aggressive scaling to ensure the 31-day table fits perfectly on one A4 page */
+  body.print-mode-dashboard #dashboard-print-view {
+    zoom: 0.94; 
+  }
+  
+  body.print-mode-dashboard #dashboard-print-view th,
+  body.print-mode-dashboard #dashboard-print-view td {
+    padding-top: 1px !important;
+    padding-bottom: 1px !important;
+    line-height: 1.1 !important;
+  }
+
+  body.print-mode-dashboard #dashboard-print-view .mt-0\.5 {
+    margin-top: 0 !important;
+  }
+  
+  body.print-mode-dashboard #dashboard-print-view .mb-2 {
+    margin-bottom: 4px !important;
+  }
+}
