@@ -264,7 +264,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
   const [githubWorkflowYaml, setGithubWorkflowYaml] = useState<string>('');
 
   useEffect(() => {
-    fetch('/github-android-release.yml')
+    fetch('/github-android-release.yml?v=' + Date.now(), { cache: 'no-store' })
       .then((r) => (r.ok ? r.text() : ''))
       .then((txt) => {
         if (txt) setGithubWorkflowYaml(txt);
@@ -272,13 +272,32 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
       .catch(() => {});
   }, []);
 
+  const handleCopyGithubWorkflow = async () => {
+    triggerHaptic(30);
+    let content = githubWorkflowYaml;
+    if (!content) {
+      try {
+        const res = await fetch('/github-android-release.yml?v=' + Date.now(), { cache: 'no-store' });
+        if (res.ok) {
+          content = await res.text();
+          setGithubWorkflowYaml(content);
+        }
+      } catch {}
+    }
+    handleCopy(content, 'gh-workflow');
+    showToast('کد کامل و جدید ورک‌فلو گیت‌هاب کپی شد!');
+  };
+
   const handleDownloadGithubWorkflow = async () => {
     triggerHaptic(30);
     let content = githubWorkflowYaml;
     if (!content) {
       try {
-        const res = await fetch('/github-android-release.yml');
-        if (res.ok) content = await res.text();
+        const res = await fetch('/github-android-release.yml?v=' + Date.now(), { cache: 'no-store' });
+        if (res.ok) {
+          content = await res.text();
+          setGithubWorkflowYaml(content);
+        }
       } catch {}
     }
     const blob = new Blob([content], { type: 'text/yaml;charset=utf-8' });
@@ -861,7 +880,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleCopy(githubWorkflowYaml, 'gh-workflow')}
+                    onClick={handleCopyGithubWorkflow}
                     className="w-full sm:w-auto flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-indigo-900 border border-indigo-300 font-black text-xs px-4 py-2.5 rounded-xl transition cursor-pointer"
                   >
                     {copiedCmd === 'gh-workflow' ? (
