@@ -27,6 +27,7 @@ export interface UserAndroidSettings {
   soundEnabled: boolean;
   wakeLockEnabled: boolean;
   highContrastMode: boolean;
+  backgroundActiveEnabled: boolean;
 }
 
 export const DEFAULT_USER_ANDROID_SETTINGS: UserAndroidSettings = {
@@ -41,6 +42,7 @@ export const DEFAULT_USER_ANDROID_SETTINGS: UserAndroidSettings = {
   soundEnabled: true,
   wakeLockEnabled: false,
   highContrastMode: false,
+  backgroundActiveEnabled: true,
 };
 
 export const USER_SETTINGS_STORAGE_KEY = 'shiftflow_user_android_settings_v1';
@@ -178,8 +180,91 @@ export function triggerAndroidHaptic(pattern: number | number[] = [50, 40, 70], 
   }
 }
 
+interface NativeAndroidBridge {
+  showNotification?: (title: string, message: string) => void;
+  requestNotificationPermission?: () => void;
+  hasNotificationPermission?: () => boolean;
+  setBackgroundActive?: (enabled: boolean, personName: string) => void;
+}
+
+/**
+ * Requests OS-level notification permission on both Native Android 13+ and Web/PWA
+ */
+export async function requestSystemNotificationPermission(): Promise<string> {
+  if (typeof window === 'undefined') return 'unsupported';
+
+  const win = window as unknown as { AndroidBridge?: NativeAndroidBridge };
+  if (win.AndroidBridge) {
+    try {
+      if (typeof win.AndroidBridge.requestNotificationPermission === 'function') {
+        win.AndroidBridge.requestNotificationPermission();
+      }
+      return 'granted';
+    } catch {}
+  }
+
+  if ('serviceWorker' in navigator) {
+    try {
+      const existing = await navigator.serviceWorker.getRegistration();
+      if (!existing) {
+        await navigator.serviceWorker.register('/sw.js');
+      }
+    } catch {}
+  }
+
+  if (typeof Notification === 'undefined') return 'unsupported';
+  if (Notification.permission === 'granted') return 'granted';
+
+  try {
+    const perm = await Notification.requestPermission();
+    return perm;
+  } catch {
+    return Notification.permission;
+  }
+}
+
+/**
+ * Syncs the selected user & schedule snapshot with the Service Worker and Native Android background monitor
+ */
+export async function syncBackgroundServiceWorkerState(
+  settings: UserAndroidSettings,
+  schedule: ShiftEntry[]
+): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  const win = window as unknown as { AndroidBridge?: NativeAndroidBridge };
+  if (win.AndroidBridge && typeof win.AndroidBridge.setBackgroundActive === 'function') {
+    try {
+      win.AndroidBridge.setBackgroundActive(
+        Boolean(settings.backgroundActiveEnabled && settings.selectedPerson),
+        settings.selectedPerson || ''
+      );
+    } catch {}
+  }
+
+  if ('serviceWorker' in navigator) {
+    try {
+      let reg = await navigator.serviceWorker.getRegistration();
+      if (!reg) {
+        reg = await navigator.serviceWorker.register('/sw.js');
+      }
+      const target = reg?.active || navigator.serviceWorker.controller;
+      if (target) {
+        target.postMessage({
+          type: 'CONFIGURE_BG_WATCHER',
+          selectedPerson: settings.selectedPerson,
+          notifyOnShiftChange: settings.notifyOnShiftChange,
+          backgroundActiveEnabled: settings.backgroundActiveEnabled,
+          scheduleJson: JSON.stringify(schedule || []),
+        });
+      }
+    } catch {}
+  }
+}
+
 /**
  * Dispatch native Android Notification (via AndroidBridge, ServiceWorker, or Notification API)
+ * Appears directly in the phone's main OS notification drawer (نوتیفیکیشن‌های اصلی گوشی)
  */
 export async function sendNativeAndroidNotification(
   title: string,
@@ -188,61 +273,75 @@ export async function sendNativeAndroidNotification(
 ): Promise<boolean> {
   if (typeof window === 'undefined') return false;
 
-  // 1. Check Native Android WebView Bridge first
-  const win = window as unknown as {
-    AndroidBridge?: {
-      showNotification?: (title: string, message: string) => void;
-    };
-  };
+  let dispatched = false;
+
+  // 1. Check Native Android WebView Bridge first (Standalone APK)
+  const win = window as unknown as { AndroidBridge?: NativeAndroidBridge };
   if (win.AndroidBridge && typeof win.AndroidBridge.showNotification === 'function') {
     try {
+      if (typeof win.AndroidBridge.requestNotificationPermission === 'function') {
+        win.AndroidBridge.requestNotificationPermission();
+      }
       win.AndroidBridge.showNotification(title, body);
-      return true;
+      dispatched = true;
     } catch {
       // Fallback to Web Notification
     }
   }
 
-  // 2. Standard Web / PWA Notification API
-  if (typeof Notification === 'undefined') return false;
-
-  let perm = Notification.permission;
-  if (perm === 'default') {
-    try {
-      perm = await Notification.requestPermission();
-    } catch {
-      return false;
+  // 2. Standard Web / Mobile Chrome / PWA OS Notification API
+  if (typeof Notification !== 'undefined') {
+    let perm = Notification.permission;
+    if (perm === 'default') {
+      try {
+        perm = await Notification.requestPermission();
+      } catch {}
     }
-  }
 
-  if (perm !== 'granted') return false;
+    if (perm === 'granted') {
+      const uniqueTag = `${tag}-${Date.now()}`;
+      const notifOptions: NotificationOptions & { renotify?: boolean; vibrate?: number[] } = {
+        body,
+        icon: '/pwa-192x192.png',
+        badge: '/pwa-192x192.png',
+        dir: 'rtl',
+        lang: 'fa',
+        tag: uniqueTag,
+        renotify: true,
+        vibrate: [200, 100, 250, 100, 300],
+      };
 
-  try {
-    if ('serviceWorker' in navigator) {
-      const reg = await navigator.serviceWorker.getRegistration();
-      if (reg && 'showNotification' in reg) {
-        await reg.showNotification(title, {
-          body,
-          icon: '/pwa-192x192.png',
-          badge: '/pwa-192x192.png',
-          dir: 'rtl',
-          lang: 'fa',
-          tag,
-        });
-        return true;
+      if ('serviceWorker' in navigator) {
+        try {
+          let reg = await navigator.serviceWorker.getRegistration();
+          if (!reg) {
+            reg = await navigator.serviceWorker.register('/sw.js');
+          }
+          if (reg && 'showNotification' in reg) {
+            await reg.showNotification(title, notifOptions);
+            dispatched = true;
+          } else if (reg && reg.active) {
+            reg.active.postMessage({
+              type: 'SHOW_OS_NOTIFICATION',
+              title,
+              body,
+              tag: uniqueTag,
+            });
+            dispatched = true;
+          }
+        } catch {}
+      }
+
+      if (!dispatched) {
+        try {
+          new Notification(title, notifOptions);
+          dispatched = true;
+        } catch {}
       }
     }
-    new Notification(title, {
-      body,
-      icon: '/pwa-192x192.png',
-      dir: 'rtl',
-      lang: 'fa',
-      tag,
-    });
-    return true;
-  } catch {
-    return false;
   }
+
+  return dispatched;
 }
 
 function getNowPersianTimeStr(): string {

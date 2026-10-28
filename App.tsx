@@ -1654,15 +1654,15 @@ const App: React.FC = () => {
     <div className="min-h-screen pb-12">
       {/* Navbar */}
       <nav className="main-navbar bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-50 no-print shadow-xs transition-all">
-        <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-14 sm:h-16 gap-1.5 sm:gap-4">
             
             {/* Branding & Status Info */}
-            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-              <div className="bg-emerald-600 text-white px-2 py-0.5 sm:py-1 rounded-lg min-w-[34px] sm:min-w-[42px] h-8 sm:h-9 flex items-center justify-center shadow-xs shrink-0">
-                 <span className="font-bold text-sm sm:text-lg leading-none" style={{ fontFamily: '"Times New Roman", Times, serif' }}>FMD</span>
+            <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1 overflow-hidden">
+              <div className="bg-emerald-600 text-white px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg min-w-[32px] sm:min-w-[42px] h-8 sm:h-9 flex items-center justify-center shadow-xs shrink-0">
+                 <span className="font-bold text-xs sm:text-lg leading-none" style={{ fontFamily: '"Times New Roman", Times, serif' }}>FMD</span>
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1 overflow-hidden">
                 <h1 className="text-xs sm:text-base md:text-lg font-black text-slate-800 tracking-tight leading-tight truncate">
                   سامانه شیفت تولید
                 </h1>
@@ -1670,8 +1670,8 @@ const App: React.FC = () => {
                   {isOwner ? (
                     <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 whitespace-nowrap shrink-0">
                        <Crown size={10} className="text-amber-600 shrink-0" />
-                       <span className="hidden xs:inline">مدیر پنل</span>
-                       <span className="xs:hidden">مدیر</span>
+                       <span className="hidden sm:inline">مدیر پنل</span>
+                       <span className="sm:hidden">مدیر</span>
                     </span>
                   ) : (
                     <span className="hidden sm:inline text-[10px] text-slate-400 font-medium whitespace-nowrap">
@@ -1682,13 +1682,13 @@ const App: React.FC = () => {
                   {/* Cloud & Server Sync Live Status Indicator */}
                   {syncStatus === 'synced' ? (
                     <span 
-                      className="inline-flex items-center gap-1.5 text-[9px] sm:text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 sm:px-2.5 py-0.5 rounded-full border border-emerald-200/90 whitespace-nowrap shrink-0 shadow-2xs" 
+                      className="inline-flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[10px] font-bold text-emerald-800 bg-emerald-50 px-1.5 sm:px-2.5 py-0.5 rounded-full border border-emerald-200/90 whitespace-nowrap shrink-0 shadow-2xs" 
                       title={`همگام‌سازی مستقیم سرور: فعال (بدون نیاز به فیلترشکن)${syncDetails.firestoreConnected ? ' | فضای ابری فایربیس: متصل' : ' | فایربیس: محدودیت شبکه (سرور مستقیم فعال است)'}${syncDetails.lastSyncTime ? ' | آخرین سینک: ' + syncDetails.lastSyncTime : ''}`}
                     >
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
-                      <Server size={10} className="text-emerald-600 shrink-0" />
-                      <span className="hidden sm:inline">همگام مستقیم (بدون فیلتر)</span>
-                      <span className="sm:hidden">همگام سرور</span>
+                      <Server size={10} className="text-emerald-600 shrink-0 hidden xs:inline" />
+                      <span className="hidden md:inline">همگام مستقیم (بدون فیلتر)</span>
+                      <span className="md:hidden">همگام</span>
                     </span>
                   ) : syncStatus === 'syncing' ? (
                     <span className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 sm:px-2 py-0.5 rounded-full border border-amber-200 animate-pulse whitespace-nowrap shrink-0" title="در حال ذخیره و انتشار تغییرات در سرور و دیتابیس ابری...">
@@ -1707,13 +1707,13 @@ const App: React.FC = () => {
             </div>
             
             {/* Navigation Tabs & Actions */}
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <div className="flex items-center gap-1 sm:gap-2 shrink-0">
               {/* Segmented Tab Pill - Only visible when Manager is logged in */}
               {isOwner && (
                 <div className="flex items-center bg-slate-100 p-0.5 sm:p-1 rounded-xl border border-slate-200/80 animate-in fade-in duration-150">
                   <button 
                     onClick={() => setActiveTab('dashboard')}
-                    className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    className={`px-1.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
                       activeTab === 'dashboard' 
                         ? 'bg-white text-slate-900 shadow-xs' 
                         : 'text-slate-500 hover:text-slate-900'
@@ -1723,7 +1723,7 @@ const App: React.FC = () => {
                   </button>
                   <button 
                     onClick={() => setActiveTab('settings')}
-                    className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    className={`px-1.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
                       activeTab === 'settings' 
                         ? 'bg-white text-slate-900 shadow-xs' 
                         : 'text-slate-500 hover:text-slate-900'
@@ -1736,7 +1736,7 @@ const App: React.FC = () => {
 
               {/* 3 Settings Subtabs in Top Navbar on Medium+ Screens */}
               {activeTab === 'settings' && isOwner && (
-                <div className="hidden md:flex items-center bg-slate-100 p-0.5 sm:p-1 rounded-xl border border-slate-200/80 animate-in fade-in duration-150">
+                <div className="hidden lg:flex items-center bg-slate-100 p-0.5 sm:p-1 rounded-xl border border-slate-200/80 animate-in fade-in duration-150">
                   <button
                     onClick={() => handleSelectSettingsSubTab('general')}
                     className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
@@ -1770,7 +1770,7 @@ const App: React.FC = () => {
                 </div>
               )}
 
-              {/* Android / Mobile App Latest Release Button */}
+              {/* Android / Mobile App Latest Release Button (Icon-only on mobile) */}
               <PWAInstallButton schedule={schedule} />
 
               {/* User Settings & Smart Shift Notification Center (For All Users) */}
@@ -1792,16 +1792,16 @@ const App: React.FC = () => {
                     try { localStorage.setItem('shiftflow_show_ai_assistant', String(nextVal)); } catch {}
                     return nextVal;
                   })}
-                  className={`flex items-center gap-1 text-xs font-bold px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl transition shadow-2xs cursor-pointer whitespace-nowrap shrink-0 border ${
+                  className={`flex items-center justify-center gap-1 text-xs font-bold w-8 h-8 sm:w-auto sm:h-9 sm:px-2.5 sm:py-1.5 rounded-xl transition shadow-2xs cursor-pointer whitespace-nowrap shrink-0 border ${
                     showAiAssistant 
                       ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
                       : 'bg-slate-100 border-slate-200 text-slate-500 hover:bg-slate-200 hover:text-slate-800'
                   }`}
                   title={showAiAssistant ? 'برای بستن و پنهان‌سازی دستیار هوش مصنوعی کلیک کنید' : 'برای فعال‌سازی دستیار هوش مصنوعی کلیک کنید'}
                 >
-                  <Sparkles size={13} className={showAiAssistant ? 'text-indigo-600' : 'text-slate-400'} />
-                  <span className="hidden sm:inline">دستیار هوش مصنوعی:</span>
-                  <span>{showAiAssistant ? 'روشن' : 'خاموش'}</span>
+                  <Sparkles size={14} className={showAiAssistant ? 'text-indigo-600' : 'text-slate-400'} />
+                  <span className="hidden lg:inline">دستیار هوش مصنوعی:</span>
+                  <span className="hidden sm:inline">{showAiAssistant ? 'روشن' : 'خاموش'}</span>
                 </button>
               )}
 
@@ -1809,12 +1809,11 @@ const App: React.FC = () => {
               {isOwner ? (
                 <button
                   onClick={handleLogoutOwner}
-                  className="flex items-center gap-1 text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl transition shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
+                  className="flex items-center justify-center gap-1 text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 w-8 h-8 sm:w-auto sm:h-9 sm:px-2.5 sm:py-1.5 rounded-xl transition shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
                   title="خروج از حساب مدیر پنل"
                 >
-                  <LogOut size={13} className="shrink-0" />
+                  <LogOut size={14} className="shrink-0" />
                   <span className="hidden sm:inline">خروج مدیر</span>
-                  <span className="sm:hidden text-[11px]">خروج</span>
                 </button>
               ) : (
                 <button
@@ -1822,7 +1821,7 @@ const App: React.FC = () => {
                     setIntendedTab('dashboard');
                     setIsPasswordModalOpen(true);
                   }}
-                  className="flex items-center gap-1 text-xs font-bold text-slate-700 hover:text-emerald-700 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl transition shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
+                  className="flex items-center justify-center gap-1 text-xs font-bold text-slate-700 hover:text-emerald-700 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 h-8 sm:h-9 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl transition shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
                   title="ورود به پنل مدیریت"
                 >
                   <KeyRound size={13} className="text-emerald-600 shrink-0" />

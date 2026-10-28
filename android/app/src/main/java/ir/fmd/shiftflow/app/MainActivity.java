@@ -4,13 +4,16 @@ import android.app.Activity;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.PowerManager;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintManager;
@@ -41,20 +44,18 @@ import java.util.Map;
 
 /**
  * ShiftFlow FMD 1405 - Standalone Offline-First Native Android Application (v3.0.0)
- * Serves the entire compiled application bundle directly from internal APK assets
- * (assets/public/) via https://localhost/ with full native bridges for:
- * - Selecting Excel (.xlsx) and PDF (.pdf) files from device storage
- * - Saving exported Excel (.xlsx) and JSON backup files to Downloads folder
- * - Printing / Exporting A4 PDF schedules & personal reports via Android PrintManager
- * - Offline localStorage / IndexedDB persistence + Cloud Firestore sync when online
+ * With OS System Notifications (Android 8-15) & Active Background Sync
  */
 public class MainActivity extends Activity {
 
     static final int FILE_CHOOSER_RESULT_CODE = 1001;
+    static final int NOTIF_PERM_REQUEST_CODE = 1002;
+    static final int BG_STATUS_NOTIFICATION_ID = 9001;
     static final String LOCAL_ORIGIN = "https://localhost";
 
     WebView webView;
     ValueCallback<Uri[]> filePathCallback;
+    PowerManager.WakeLock bgWakeLock;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -78,8 +79,37 @@ public class MainActivity extends Activity {
         ));
         setContentView(rootLayout);
 
+        ensureNotificationPermission();
         configureWebView();
         webView.loadUrl(LOCAL_ORIGIN + "/index.html");
+    }
+
+    void ensureNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            try {
+                if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, NOTIF_PERM_REQUEST_CODE);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // Keep WebView JS timers active in the background so shift change notifications arrive immediately
+        if (webView != null) {
+            webView.resumeTimers();
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (webView != null) {
+            webView.resumeTimers();
+        }
     }
 
     private void configureWebView() {
@@ -315,6 +345,24 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void requestNotificationPermission() {
+            activity.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    activity.ensureNotificationPermission();
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public boolean hasNotificationPermission() {
+            if (Build.VERSION.SDK_INT >= 33) {
+                return activity.checkSelfPermission("android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED;
+            }
+            return true;
+        }
+
+        @JavascriptInterface
         public void printPage(String jobTitle) {
             activity.runOnUiThread(new PrintTask(activity, jobTitle));
         }
@@ -325,30 +373,74 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void setBackgroundActive(final boolean enabled, final String personName) {
+            activity.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        PowerManager pm = (PowerManager) activity.getSystemService(Context.POWER_SERVICE);
+                        if (enabled) {
+                            if (activity.bgWakeLock == null && pm != null) {
+                                activity.bgWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ShiftFlow::BgSyncLock");
+                                activity.bgWakeLock.setReferenceCounted(false);
+                            }
+                            if (activity.bgWakeLock != null && !activity.bgWakeLock.isHeld()) {
+                                activity.bgWakeLock.acquire(12 * 60 * 60 * 1000L);
+                            }
+                        } else {
+                            if (activity.bgWakeLock != null && activity.bgWakeLock.isHeld()) {
+                                activity.bgWakeLock.release();
+                            }
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+            });
+        }
+
+        @JavascriptInterface
         public void showNotification(final String title, final String message) {
             activity.runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
                     try {
+                        activity.ensureNotificationPermission();
                         NotificationManager nm = (NotificationManager) activity.getSystemService(Context.NOTIFICATION_SERVICE);
                         if (nm == null) return;
-                        String channelId = "shiftflow_alerts";
+                        String channelId = "shiftflow_high_alerts_v2";
+                        Intent launchIntent = new Intent(activity, MainActivity.class);
+                        launchIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                        int piFlags = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
+                        PendingIntent contentIntent = PendingIntent.getActivity(activity, 0, launchIntent, piFlags);
+
                         Notification.Builder builder;
                         if (Build.VERSION.SDK_INT >= 26) {
                             NotificationChannel channel = new NotificationChannel(
                                     channelId,
-                                    "اعلان‌های شیفت تولید FMD",
+                                    "اعلان‌های فوری شیفت تولید FMD",
                                     NotificationManager.IMPORTANCE_HIGH
                             );
+                            channel.enableVibration(true);
+                            channel.setVibrationPattern(new long[]{0, 250, 150, 250});
+                            channel.enableLights(true);
+                            channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
                             nm.createNotificationChannel(channel);
                             builder = new Notification.Builder(activity, channelId);
                         } else {
-                            builder = new Notification.Builder(activity);
+                            builder = new Notification.Builder(activity)
+                                    .setPriority(Notification.PRIORITY_MAX)
+                                    .setDefaults(Notification.DEFAULT_ALL);
                         }
-                        builder.setContentTitle(title != null ? title : "ShiftFlow FMD")
-                                .setContentText(message != null ? message : "")
-                                .setSmallIcon(android.R.drawable.ic_dialog_info)
+
+                        String safeTitle = title != null ? title : "ShiftFlow FMD";
+                        String safeMsg = message != null ? message : "";
+                        builder.setContentTitle(safeTitle)
+                                .setContentText(safeMsg)
+                                .setStyle(new Notification.BigTextStyle().bigText(safeMsg))
+                                .setSmallIcon(android.R.drawable.ic_popup_reminder)
+                                .setContentIntent(contentIntent)
                                 .setAutoCancel(true);
+
                         nm.notify((int) (System.currentTimeMillis() & 0xfffffff), builder.build());
                     } catch (Exception ignored) {
                     }

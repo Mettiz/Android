@@ -49,12 +49,28 @@ import {
   playNotificationChime,
   triggerAndroidHaptic,
   sendNativeAndroidNotification,
+  requestSystemNotificationPermission,
+  syncBackgroundServiceWorkerState,
   generatePersonalShiftICS,
 } from '../utils/shiftNotifications';
 
 const GITHUB_REPO = 'Mettiz/Android';
 const LATEST_RELEASE_PAGE_URL = `https://github.com/${GITHUB_REPO}/releases/latest`;
 const LATEST_APK_DIRECT_URL = `https://github.com/${GITHUB_REPO}/releases/latest/download/ShiftFlow-FMD.apk`;
+
+/**
+ * آیکون رسمی ربات اندروید برای نمایش تمیز در نوار بالای نسخه موبایل و دسکتاپ
+ */
+export const AndroidLogoIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    className={className}
+    aria-hidden="true"
+  >
+    <path d="M17.523 15.341a1.003 1.003 0 0 1-1.002-1.002c0-.553.45-1.002 1.002-1.002.552 0 1.002.45 1.002 1.002 0 .552-.45 1.002-1.002 1.002m-11.046 0a1.003 1.003 0 0 1-1.002-1.002c0-.553.45-1.002 1.002-1.002.552 0 1.002.45 1.002 1.002 0 .552-.45 1.002-1.002 1.002m11.405-6.02 1.997-3.46a.416.416 0 0 0-.152-.567.416.416 0 0 0-.568.152L17.112 8.95c-1.504-.686-3.222-1.073-5.112-1.073-1.89 0-3.608.387-5.112 1.073L4.841 5.446a.416.416 0 0 0-.568-.152.416.416 0 0 0-.152.567l1.997 3.46C2.688 11.186.343 14.658 0 18.761h24c-.343-4.103-2.688-7.575-6.118-9.44" />
+  </svg>
+);
 
 export const OfflineIndicator: React.FC = () => {
   const isOnline = useOnlineStatus();
@@ -85,7 +101,8 @@ interface GitHubReleaseInfo {
 
 /**
  * دکمه «اپلیکیشن اندروید»:
- * فقط لینک آخرین انتشار (Latest Releases) در گیت‌هاب و دانلود مستقیم آخرین نسخه را نمایش می‌دهد.
+ * در موبایل فقط آیکون اندروید نمایش داده می‌شود تا هدر بالا شلوغ نشود.
+ * با کلیک روی آن فقط لینک آخرین انتشار (Latest Releases) و دانلود مستقیم باز می‌شود.
  */
 export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ className = '' }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -157,7 +174,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ className = 
         <div className="bg-gradient-to-l from-emerald-900 via-emerald-800 to-teal-800 p-4 sm:p-5 text-white flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-2xl bg-white/15 border border-white/25 flex items-center justify-center shadow-inner shrink-0">
-              <Smartphone className="w-6 h-6 text-emerald-300" />
+              <AndroidLogoIcon className="w-6 h-6 text-emerald-300" />
             </div>
             <div>
               <h2 className="text-sm sm:text-base font-black flex items-center gap-2">
@@ -261,11 +278,12 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ className = 
       <button
         type="button"
         onClick={() => setIsModalOpen(true)}
-        className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-2xs border cursor-pointer shrink-0 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200 ${className}`}
-        title="دریافت آخرین نسخه اپلیکیشن اندروید از بخش Releases"
+        className={`flex items-center justify-center gap-1.5 w-8 h-8 sm:w-9 sm:h-9 md:w-auto md:h-auto md:px-3 md:py-1.5 rounded-xl text-xs font-bold transition-all shadow-2xs border cursor-pointer shrink-0 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200 ${className}`}
+        title="دانلود اپلیکیشن اندروید (آخرین Releases)"
+        aria-label="اپلیکیشن اندروید"
       >
-        <Smartphone className="w-4 h-4 shrink-0 text-emerald-600" />
-        <span className="whitespace-nowrap">اپلیکیشن اندروید</span>
+        <AndroidLogoIcon className="w-4 h-4 sm:w-[18px] sm:h-[18px] shrink-0 text-emerald-600" />
+        <span className="hidden md:inline whitespace-nowrap">اپلیکیشن اندروید</span>
       </button>
 
       {typeof document !== 'undefined' && modalContent
@@ -308,9 +326,12 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
   const [wakeLockSentinel, setWakeLockSentinel] = useState<{ release: () => Promise<void> } | null>(
     null
   );
-  const [notifPermission, setNotifPermission] = useState<string>(
-    typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
-  );
+  const [notifPermission, setNotifPermission] = useState<string>(() => {
+    if (typeof window !== 'undefined' && (window as unknown as { AndroidBridge?: unknown }).AndroidBridge) {
+      return 'granted';
+    }
+    return typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
+  });
   const [isPersonDropdownOpen, setIsPersonDropdownOpen] = useState(false);
 
   const prevScheduleRef = useRef<ShiftEntry[] | null>(null);
@@ -327,6 +348,11 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
       return next;
     });
   };
+
+  // Sync Service Worker & Native Android Background Watcher whenever settings or schedule changes
+  useEffect(() => {
+    syncBackgroundServiceWorkerState(settings, schedule);
+  }, [settings, schedule]);
 
   // Apply High Readability / Large Font Mode on document root if enabled
   useEffect(() => {
@@ -464,12 +490,14 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
           return updated;
         });
 
-        // Show live banner + sound + haptic + native notification for the latest change
+        // Show live banner + sound + haptic + OS phone notification for EVERY detected change
         const latest = detected[0];
         setLiveBannerNotif(latest);
         playNotificationChime(settings.soundEnabled);
         triggerAndroidHaptic([70, 50, 120], settings.hapticEnabled);
-        sendNativeAndroidNotification(latest.title, latest.message, latest.id);
+        for (const item of detected.slice(0, 3)) {
+          sendNativeAndroidNotification(item.title, item.message, item.id);
+        }
       }
     }
 
@@ -507,7 +535,7 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
           return updated;
         });
 
-        // Only pop live banner if tomorrow is an active Day or Night shift
+        // Send OS notification & live banner if tomorrow is an active Day or Night shift
         if (notif.shiftKind === 'Day' || notif.shiftKind === 'Night') {
           setLiveBannerNotif(notif);
           sendNativeAndroidNotification(notif.title, notif.message, `tom-${reminderKey}`);
@@ -556,6 +584,23 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
     showToast('تاریخچه اعلان‌ها پاک شد.');
   };
 
+  const handleEnablePhoneOSNotifications = async () => {
+    triggerAndroidHaptic([40, 40, 60], settings.hapticEnabled);
+    const perm = await requestSystemNotificationPermission();
+    setNotifPermission(perm);
+    if (perm === 'granted') {
+      const personLabel = settings.selectedPerson || 'کاربر';
+      await sendNativeAndroidNotification(
+        'نوتیفیکیشن اصلی گوشی فعال شد',
+        `${personLabel} عزیز، از این پس تغییرات شیفت و یادآور شیفت فردا مستقیماً در نوتیفیکیشن‌های اصلی گوشی شما نمایش داده می‌شود.`,
+        `os-perm-ok-${Date.now()}`
+      );
+      showToast('نوتیفیکیشن اصلی گوشی با موفقیت فعال و تست شد!');
+    } else {
+      showToast('لطفاً مجوز نمایش نوتیفیکیشن را در تنظیمات مرورگر/گوشی تایید کنید.');
+    }
+  };
+
   // Manual trigger: Send Tomorrow & Today Shift Reminder right now
   const handleSendTomorrowReminderNow = async () => {
     if (!settings.selectedPerson) {
@@ -567,12 +612,8 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
     triggerAndroidHaptic([40, 50, 40], settings.hapticEnabled);
     playNotificationChime(settings.soundEnabled);
 
-    if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
-      try {
-        const perm = await Notification.requestPermission();
-        setNotifPermission(perm);
-      } catch {}
-    }
+    const perm = await requestSystemNotificationPermission();
+    setNotifPermission(perm);
 
     const summary = buildDailyShiftReminder(
       schedule,
@@ -594,7 +635,7 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
       });
       setLiveBannerNotif(notif);
       await sendNativeAndroidNotification(notif.title, notif.message, notif.id);
-      showToast('اعلان وضعیت شیفت فردا برای شما ارسال شد!');
+      showToast('اعلان وضعیت شیفت فردا به نوتیفیکیشن اصلی گوشی ارسال شد!');
     }
   };
 
@@ -608,6 +649,9 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
 
     triggerAndroidHaptic([80, 50, 120], settings.hapticEnabled);
     playNotificationChime(settings.soundEnabled);
+
+    const perm = await requestSystemNotificationPermission();
+    setNotifPermission(perm);
 
     const sampleShift =
       schedule.find((s) => {
@@ -625,7 +669,7 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
       personName: settings.selectedPerson,
       type: 'swap_added',
       title: `تست اعلان جابجایی شیفت (${dayName} ${dateFa})`,
-      message: `${settings.selectedPerson} عزیز، شیفت شما در تاریخ ${dateFa} (${dayName}) به‌روزرسانی شد. در صورت هرگونه تغییر واقعی در جدول توسط مدیر، همین اعلان بلافاصله برای شما ارسال می‌شود.`,
+      message: `${settings.selectedPerson} عزیز، شیفت شما در تاریخ ${dateFa} (${dayName}) به‌روزرسانی شد. در صورت هرگونه تغییر واقعی در جدول توسط مدیر، همین اعلان بلافاصله در نوتیفیکیشن اصلی گوشی شما نمایش داده می‌شود.`,
       shiftDate: sampleShift?.date || '1405/08/05',
       shiftDayName: dayName,
       shiftKind: 'Night',
@@ -639,7 +683,7 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
     });
     setLiveBannerNotif(testNotif);
     await sendNativeAndroidNotification(testNotif.title, testNotif.message, testNotif.id);
-    showToast('اعلان تست جابجایی شیفت با موفقیت اجرا شد!');
+    showToast('اعلان تست جابجایی به نوتیفیکیشن اصلی گوشی ارسال شد!');
   };
 
   // Toggle Android Screen Wake Lock
@@ -775,22 +819,30 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
 
   return (
     <>
-      {/* Top Navbar Trigger Button for All Users */}
+      {/* Top Navbar Trigger Button for All Users (Compact on Mobile so icons never overlap) */}
       <button
         type="button"
         onClick={() => {
           triggerAndroidHaptic(25, settings.hapticEnabled);
           setIsOpen(true);
         }}
-        className="relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-2xs border cursor-pointer shrink-0 bg-slate-100 hover:bg-slate-200/80 text-slate-800 border-slate-200/90"
-        title="تنظیمات کاربری، انتخاب نام کارشناس برای اعلان شیفت و قابلیت‌های کاربردی اندروید"
+        className="relative flex items-center justify-center gap-1 sm:gap-1.5 h-8 sm:h-9 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition-all shadow-2xs border cursor-pointer shrink-0 bg-slate-100 hover:bg-slate-200/80 text-slate-800 border-slate-200/90"
+        title="تنظیمات کاربری، انتخاب نام برای نوتیفیکیشن اصلی گوشی و امکانات اندروید"
       >
-        <SlidersHorizontal className="w-3.5 h-3.5 text-teal-700 shrink-0" />
-        <span className="whitespace-nowrap">
-          {settings.selectedPerson ? `تنظیمات: ${settings.selectedPerson}` : 'تنظیمات و اعلان شیفت'}
-        </span>
+        <BellRing className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-teal-700 shrink-0" />
+        {settings.selectedPerson ? (
+          <span className="max-w-[54px] sm:max-w-none truncate whitespace-nowrap">
+            <span className="hidden sm:inline">تنظیمات: </span>
+            {settings.selectedPerson}
+          </span>
+        ) : (
+          <>
+            <span className="hidden sm:inline whitespace-nowrap">تنظیمات و اعلان شیفت</span>
+            <span className="sm:hidden whitespace-nowrap">اعلان</span>
+          </>
+        )}
         {unreadCount > 0 && (
-          <span className="flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] font-black shadow-2xs">
+          <span className="flex items-center justify-center min-w-[16px] h-[16px] sm:min-w-[18px] sm:h-[18px] px-1 rounded-full bg-rose-600 text-white text-[9px] sm:text-[10px] font-black shadow-2xs">
             {toPersianDigits(unreadCount)}
           </span>
         )}
@@ -874,7 +926,7 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
                       <span>تنظیمات کاربری، اعلان هوشمند شیفت و امکانات اندروید</span>
                     </h2>
                     <p className="text-[11px] text-emerald-100/85 mt-0.5">
-                      انتخاب نام، هشدار خودکار جابجایی/حذف شیفت، یادآور شیفت فردا و ابزارهای کاربردی گوشی
+                      انتخاب نام، نمایش در نوتیفیکیشن‌های اصلی گوشی، فعالیت در پس‌زمینه و یادآور شیفت فردا
                     </p>
                   </div>
                 </div>
@@ -947,6 +999,34 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
 
               {/* Modal Body */}
               <div className="p-4 sm:p-5 space-y-4 max-h-[72vh] overflow-y-auto bg-white">
+                {/* OS Notification & Background Activity Bar */}
+                <div className="rounded-2xl border border-teal-200 bg-teal-50/70 p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    <div className="p-2 rounded-xl bg-teal-600 text-white shrink-0 mt-0.5">
+                      <BellRing className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-black text-teal-950 flex items-center gap-1.5 flex-wrap">
+                        <span>نمایش در نوتیفیکیشن‌های اصلی گوشی + فعالیت در پس‌زمینه</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed">
+                        {notifPermission === 'granted'
+                          ? 'مجوز نوتیفیکیشن اصلی گوشی فعال است و برنامه در پس‌زمینه تغییرات شیفت را رصد می‌کند.'
+                          : 'برای اینکه اعلان‌ها علاوه بر داخل برنامه، در نوار نوتیفیکیشن بالای گوشی هم بیایند، دکمه روبرو را بزنید.'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleEnablePhoneOSNotifications}
+                    className="w-full sm:w-auto shrink-0 px-3.5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-black transition cursor-pointer shadow-2xs whitespace-nowrap"
+                  >
+                    {notifPermission === 'granted'
+                      ? 'تست ارسال به نوتیفیکیشن گوشی'
+                      : 'فعال‌سازی نوتیفیکیشن اصلی گوشی'}
+                  </button>
+                </div>
+
                 {/* TAB 1: SELECT USER NAME & LIVE SHIFT STATUS */}
                 {activeTab === 'profile' && (
                   <div className="space-y-4">
@@ -958,7 +1038,7 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
                             <span>انتخاب نام شما:</span>
                           </h3>
                           <p className="text-[11px] text-slate-500 mt-0.5">
-                            نام خود را از منوی کشویی زیر انتخاب کنید تا اعلان‌های جابجایی، حذف یا یادآوری شیفت فردا برای شما فعال شود.
+                            نام خود را از منوی کشویی زیر انتخاب کنید تا اعلان‌های جابجایی، حذف یا یادآوری شیفت فردا در نوتیفیکیشن اصلی گوشی فعال شود.
                           </p>
                         </div>
                         {settings.selectedPerson && (
@@ -1023,12 +1103,19 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
                                 <button
                                   key={person.name}
                                   type="button"
-                                  onClick={() => {
+                                  onClick={async () => {
                                     triggerAndroidHaptic(30, settings.hapticEnabled);
                                     updateSettings({ selectedPerson: person.name });
                                     setIsPersonDropdownOpen(false);
+                                    const perm = await requestSystemNotificationPermission();
+                                    setNotifPermission(perm);
+                                    await sendNativeAndroidNotification(
+                                      `اعلان هوشمند شیفت فعال شد (${person.name})`,
+                                      `${person.name} عزیز، از این پس هرگونه جابجایی شیفت یا یادآوری شیفت فردا در نوتیفیکیشن‌های اصلی گوشی شما نمایش داده می‌شود.`,
+                                      `select-person-${person.name}`
+                                    );
                                     showToast(
-                                      `نام شما (${person.name}) انتخاب شد. اعلان‌های شیفت برای شما فعال است.`
+                                      `نام شما (${person.name}) انتخاب شد و نوتیفیکیشن اصلی گوشی فعال گردید.`
                                     );
                                   }}
                                   className={`w-full flex items-center justify-between px-4 py-2.5 text-right transition cursor-pointer ${
@@ -1326,6 +1413,38 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
                           }`}
                         >
                           {settings.notifyBioprocessOnShift ? 'فعال' : 'غیرفعال'}
+                        </button>
+                      </div>
+
+                      {/* Toggle 5: Keep App Active in Background for Instant Shift Notifications */}
+                      <div className="p-3.5 flex items-center justify-between gap-3 bg-emerald-50/40">
+                        <div className="space-y-0.5">
+                          <div className="text-xs sm:text-sm font-black text-slate-800 flex items-center gap-1.5">
+                            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span>فعال ماندن برنامه در پس‌زمینه (Background Active Sync)</span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 leading-relaxed">
+                            حفظ ارتباط زنده در پس‌زمینه تا حتی وقتی صفحه گوشی خاموش یا برنامه بسته است، تغییرات شیفت بلافاصله در نوتیفیکیشن اصلی گوشی ظاهر شود.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = !settings.backgroundActiveEnabled;
+                            updateSettings({ backgroundActiveEnabled: next });
+                            showToast(
+                              next
+                                ? 'پایش زنده در پس‌زمینه فعال شد.'
+                                : 'پایش در پس‌زمینه غیرفعال شد.'
+                            );
+                          }}
+                          className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition cursor-pointer shrink-0 ${
+                            settings.backgroundActiveEnabled
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {settings.backgroundActiveEnabled ? 'فعال' : 'غیرفعال'}
                         </button>
                       </div>
 

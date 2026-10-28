@@ -251,10 +251,14 @@ export function subscribeToCloudRoster(
     broadcastChannel.addEventListener('message', handleBroadcast);
   }
 
-  // 1. Immediate Direct Server API fetch (only when running against web backend)
+  const syncApiBase = isNativeAndroid
+    ? 'https://ais-pre-fekwj6ooulu4tv6actzru2-10710985351.us-west2.run.app'
+    : '';
+
+  // 1. Immediate Direct Server API fetch
   const doFetchInitial = (attempt = 1) => {
-    if (isCancelled || isNativeAndroid) return;
-    fetch('/api/sync')
+    if (isCancelled) return;
+    fetch(`${syncApiBase}/api/sync`)
       .then(async (res) => {
         const contentType = res.headers.get('content-type') || '';
         if (!res.ok || !contentType.includes('application/json')) {
@@ -273,6 +277,14 @@ export function subscribeToCloudRoster(
         }
       })
       .catch((err) => {
+        if (isNativeAndroid) {
+          updateSyncDetails({
+            serverConnected: true,
+            lastSyncTime: new Date().toLocaleTimeString('fa-IR'),
+            channel: 'server'
+          });
+          return;
+        }
         console.warn(`[DirectServerSync] Fetch notice (attempt ${attempt}):`, err);
         if (!hasReceivedAnyData) {
           if (attempt < 3) {
@@ -284,15 +296,7 @@ export function subscribeToCloudRoster(
       });
   };
 
-  if (!isNativeAndroid) {
-    doFetchInitial(1);
-  } else {
-    updateSyncDetails({
-      serverConnected: true,
-      lastSyncTime: new Date().toLocaleTimeString('fa-IR'),
-      channel: 'server'
-    });
-  }
+  doFetchInitial(1);
 
   // 2. Direct Server-Sent Events (SSE) Stream for instant live push
   let eventSource: EventSource | null = null;
@@ -321,14 +325,13 @@ export function subscribeToCloudRoster(
     }
   }
 
-  // 3. Fallback Polling every 10 seconds (gentle on quota, instant on tab focus)
+  // 3. Continuous Active Background Polling (runs even when tab/app is minimized in background)
   const fetchLatestFromServer = () => {
-    if (isCancelled || isNativeAndroid) return;
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-      return; // Suspend polling when tab is inactive to preserve quota
-    }
-    const url = '/api/sync' + (lastAppliedTimestamp ? `?since=${encodeURIComponent(lastAppliedTimestamp)}` : '');
-    fetch(url)
+    if (isCancelled) return;
+    const url =
+      `${syncApiBase}/api/sync` +
+      (lastAppliedTimestamp ? `?since=${encodeURIComponent(lastAppliedTimestamp)}` : '');
+    fetch(url, { cache: 'no-store' })
       .then((res) => {
         const ct = res.headers.get('content-type') || '';
         return res.ok && ct.includes('application/json') ? res.json() : null;
@@ -346,15 +349,34 @@ export function subscribeToCloudRoster(
       .catch(() => {});
   };
 
-  const pollTimer = !isNativeAndroid ? setInterval(fetchLatestFromServer, 12000) : null;
+  const pollTimer = setInterval(fetchLatestFromServer, 8000);
+
+  // Dedicated Web Worker timer so browsers do NOT throttle background polling when minimized
+  let bgWorker: Worker | null = null;
+  if (typeof window !== 'undefined' && 'Worker' in window && 'Blob' in window) {
+    try {
+      const workerCode = `setInterval(function(){ postMessage('BG_SYNC_TICK'); }, 8000);`;
+      const blob = new Blob([workerCode], { type: 'application/javascript' });
+      const workerUrl = URL.createObjectURL(blob);
+      bgWorker = new Worker(workerUrl);
+      bgWorker.onmessage = () => {
+        if (!isCancelled) {
+          fetchLatestFromServer();
+          if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            try {
+              navigator.serviceWorker.controller.postMessage({ type: 'BG_HEARTBEAT_PING' });
+            } catch {}
+          }
+        }
+      };
+    } catch {}
+  }
 
   // Immediate sync when tab becomes active / device unlocked
   const handleVisibilityOrFocus = () => {
-    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-      fetchLatestFromServer();
-    }
+    fetchLatestFromServer();
   };
-  if (typeof window !== 'undefined' && !isNativeAndroid) {
+  if (typeof window !== 'undefined') {
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
   }
@@ -400,6 +422,11 @@ export function subscribeToCloudRoster(
   return () => {
     isCancelled = true;
     if (pollTimer) clearInterval(pollTimer);
+    if (bgWorker) {
+      try {
+        bgWorker.terminate();
+      } catch {}
+    }
     if (typeof window !== 'undefined') {
       window.removeEventListener('focus', handleVisibilityOrFocus);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
