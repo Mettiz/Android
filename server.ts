@@ -418,8 +418,8 @@ async function startServer() {
         updatedAt: now
       });
 
-      // 3. Persist to Firestore cloud database
-      persistToFirestore(currentState, true).catch((e) => {
+      // 3. Persist to Firestore cloud database immediately for instant cross-instance & Android sync
+      persistToFirestore(currentState, true, true).catch((e) => {
         console.warn('[SyncServer] Background Firestore write notice:', e);
       });
 

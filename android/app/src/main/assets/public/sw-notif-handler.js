@@ -7,6 +7,26 @@ const BG_STATE = {
   pollingTimer: null,
 };
 
+function normalizePersonKey(name) {
+  if (!name) return '';
+  return String(name)
+    .trim()
+    .replace(/ي/g, 'ی')
+    .replace(/ك/g, 'ک')
+    .replace(/ة/g, 'ه')
+    .replace(/[آأإ]/g, 'ا')
+    .replace(/^(مهندس|اقای|آقای|خانم|دکتر|جناب\s*آقای|جناب)\s+/g, '')
+    .replace(/[\s\u200B-\u200D\uFEFF\u00A0\-\_\.]+/g, '');
+}
+
+function isSamePerson(a, b) {
+  if (!a || !b) return false;
+  if (String(a).trim() === String(b).trim()) return true;
+  const ka = normalizePersonKey(a);
+  const kb = normalizePersonKey(b);
+  return Boolean(ka && kb && ka === kb);
+}
+
 function splitParticipants(raw, extras) {
   const base = String(raw || '')
     .split(/[\/،,\-\+]+/)
@@ -21,18 +41,18 @@ function getRoles(entry, personName) {
   const dayAll = splitParticipants(entry.dayShiftPerson, entry.extraDayPersons);
   const nightAll = splitParticipants(entry.nightShiftPerson, entry.extraNightPersons);
   return {
-    isDay: dayAll.includes(personName),
-    isNight: nightAll.includes(personName),
-    isOnCall: String(entry.onCallPerson || '').trim() === personName,
+    isDay: dayAll.some((p) => isSamePerson(p, personName)),
+    isNight: nightAll.some((p) => isSamePerson(p, personName)),
+    isOnCall: isSamePerson(entry.onCallPerson || '', personName),
     dayAll,
     nightAll,
   };
 }
 
 async function checkServerScheduleInBackground() {
-  if (!BG_STATE.selectedPerson || !BG_STATE.notifyOnShiftChange) return;
+  if (!BG_STATE.notifyOnShiftChange) return;
   try {
-    const res = await fetch('/api/sync', { cache: 'no-store' });
+    const res = await fetch('/api/sync?_t=' + Date.now(), { cache: 'no-store' });
     if (!res.ok) return;
     const json = await res.json();
     if (!json || !json.exists || !json.data || !Array.isArray(json.data.schedule)) return;
@@ -49,10 +69,14 @@ async function checkServerScheduleInBackground() {
 
     if (newScheduleJson === BG_STATE.lastScheduleJson) return;
 
-    // Check if any client window is currently visible; if not, SW fires OS notification directly
     const oldSchedule = JSON.parse(BG_STATE.lastScheduleJson);
     BG_STATE.lastScheduleJson = newScheduleJson;
     BG_STATE.lastUpdatedAt = newUpdatedAt;
+
+    // Only dispatch from Service Worker if no visible window is already handling it
+    const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const hasVisibleClient = clientList.some((c) => c.visibilityState === 'visible');
+    if (hasVisibleClient) return;
 
     const oldMap = new Map();
     for (const item of oldSchedule) {
@@ -65,71 +89,77 @@ async function checkServerScheduleInBackground() {
       const oldEntry = oldMap.get(newEntry.date);
       if (!oldEntry) continue;
 
-      const oldR = getRoles(oldEntry, person);
-      const newR = getRoles(newEntry, person);
+      if (person) {
+        const oldR = getRoles(oldEntry, person);
+        const newR = getRoles(newEntry, person);
 
-      if (oldR.isDay && !newR.isDay) {
-        await self.registration.showNotification(
-          `جابجایی/حذف از شیفت روز (${newEntry.dayName} ${newEntry.date})`,
-          {
-            body: `${person} عزیز، شما از شیفت روز ${newEntry.dayName} (${newEntry.date}) برداشته شدید.`,
-            icon: '/pwa-192x192.png',
-            badge: '/pwa-192x192.png',
-            dir: 'rtl',
-            lang: 'fa',
-            vibrate: [200, 100, 250, 100, 300],
-            tag: `sw-day-rem-${newEntry.date}-${Date.now()}`,
-            renotify: true,
-            requireInteraction: true,
-          }
-        );
-      } else if (!oldR.isDay && newR.isDay) {
-        await self.registration.showNotification(
-          `ثبت شیفت روز جدید (${newEntry.dayName} ${newEntry.date})`,
-          {
-            body: `${person} عزیز، شما برای شیفت روز ${newEntry.dayName} (${newEntry.date}) ثبت شدید.`,
-            icon: '/pwa-192x192.png',
-            badge: '/pwa-192x192.png',
-            dir: 'rtl',
-            lang: 'fa',
-            vibrate: [200, 100, 250, 100, 300],
-            tag: `sw-day-add-${newEntry.date}-${Date.now()}`,
-            renotify: true,
-            requireInteraction: true,
-          }
-        );
-      }
+        if (oldR.isDay && !newR.isDay) {
+          await self.registration.showNotification(
+            `جابجایی/حذف از شیفت روز (${newEntry.dayName} ${newEntry.date})`,
+            {
+              body: `${person} عزیز، شما از شیفت روز ${newEntry.dayName} (${newEntry.date}) برداشته شدید.`,
+              icon: '/pwa-192x192.png',
+              badge: '/pwa-192x192.png',
+              dir: 'rtl',
+              lang: 'fa',
+              vibrate: [200, 100, 250, 100, 300],
+              tag: `sw-day-rem-${newEntry.date}-${Date.now()}`,
+              renotify: true,
+              requireInteraction: true,
+            }
+          );
+          continue;
+        } else if (!oldR.isDay && newR.isDay) {
+          await self.registration.showNotification(
+            `ثبت شیفت روز جدید (${newEntry.dayName} ${newEntry.date})`,
+            {
+              body: `${person} عزیز، شما برای شیفت روز ${newEntry.dayName} (${newEntry.date}) ثبت شدید.`,
+              icon: '/pwa-192x192.png',
+              badge: '/pwa-192x192.png',
+              dir: 'rtl',
+              lang: 'fa',
+              vibrate: [200, 100, 250, 100, 300],
+              tag: `sw-day-add-${newEntry.date}-${Date.now()}`,
+              renotify: true,
+              requireInteraction: true,
+            }
+          );
+          continue;
+        }
 
-      if (oldR.isNight && !newR.isNight) {
-        await self.registration.showNotification(
-          `جابجایی/حذف از شیفت شب (${newEntry.dayName} ${newEntry.date})`,
-          {
-            body: `${person} عزیز، شما از شیفت شب ${newEntry.dayName} (${newEntry.date}) برداشته شدید.`,
-            icon: '/pwa-192x192.png',
-            badge: '/pwa-192x192.png',
-            dir: 'rtl',
-            lang: 'fa',
-            vibrate: [200, 100, 250, 100, 300],
-            tag: `sw-night-rem-${newEntry.date}-${Date.now()}`,
-            renotify: true,
-            requireInteraction: true,
-          }
-        );
-      } else if (!oldR.isNight && newR.isNight) {
-        await self.registration.showNotification(
-          `ثبت شیفت شب جدید (${newEntry.dayName} ${newEntry.date})`,
-          {
-            body: `${person} عزیز، شما برای شیفت شب ${newEntry.dayName} (${newEntry.date}) ثبت شدید.`,
-            icon: '/pwa-192x192.png',
-            badge: '/pwa-192x192.png',
-            dir: 'rtl',
-            lang: 'fa',
-            vibrate: [200, 100, 250, 100, 300],
-            tag: `sw-night-add-${newEntry.date}-${Date.now()}`,
-            renotify: true,
-            requireInteraction: true,
-          }
-        );
+        if (oldR.isNight && !newR.isNight) {
+          await self.registration.showNotification(
+            `جابجایی/حذف از شیفت شب (${newEntry.dayName} ${newEntry.date})`,
+            {
+              body: `${person} عزیز، شما از شیفت شب ${newEntry.dayName} (${newEntry.date}) برداشته شدید.`,
+              icon: '/pwa-192x192.png',
+              badge: '/pwa-192x192.png',
+              dir: 'rtl',
+              lang: 'fa',
+              vibrate: [200, 100, 250, 100, 300],
+              tag: `sw-night-rem-${newEntry.date}-${Date.now()}`,
+              renotify: true,
+              requireInteraction: true,
+            }
+          );
+          continue;
+        } else if (!oldR.isNight && newR.isNight) {
+          await self.registration.showNotification(
+            `ثبت شیفت شب جدید (${newEntry.dayName} ${newEntry.date})`,
+            {
+              body: `${person} عزیز، شما برای شیفت شب ${newEntry.dayName} (${newEntry.date}) ثبت شدید.`,
+              icon: '/pwa-192x192.png',
+              badge: '/pwa-192x192.png',
+              dir: 'rtl',
+              lang: 'fa',
+              vibrate: [200, 100, 250, 100, 300],
+              tag: `sw-night-add-${newEntry.date}-${Date.now()}`,
+              renotify: true,
+              requireInteraction: true,
+            }
+          );
+          continue;
+        }
       }
     }
   } catch (e) {
@@ -166,8 +196,8 @@ self.addEventListener('message', (event) => {
       clearInterval(BG_STATE.pollingTimer);
       BG_STATE.pollingTimer = null;
     }
-    if (BG_STATE.selectedPerson && data.backgroundActiveEnabled !== false) {
-      BG_STATE.pollingTimer = setInterval(checkServerScheduleInBackground, 10000);
+    if (data.backgroundActiveEnabled !== false) {
+      BG_STATE.pollingTimer = setInterval(checkServerScheduleInBackground, 4000);
     }
   } else if (data.type === 'BG_HEARTBEAT_PING') {
     event.waitUntil(checkServerScheduleInBackground());

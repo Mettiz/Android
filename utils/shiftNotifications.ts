@@ -88,6 +88,30 @@ export function saveNotificationHistory(items: ShiftNotificationItem[]): void {
 }
 
 /**
+ * Normalizes a Persian person name so minor differences in spacing, ZWNJ, Arabic/Persian Yeh/Kaf,
+ * or honorific prefixes ("مهندس", "آقای", etc.) never prevent matching a person in a shift swap.
+ */
+export function normalizePersonNameKey(name: string): string {
+  if (!name) return '';
+  return name
+    .trim()
+    .replace(/ي/g, 'ی')
+    .replace(/ك/g, 'ک')
+    .replace(/ة/g, 'ه')
+    .replace(/[آأإ]/g, 'ا')
+    .replace(/^(مهندس|اقای|آقای|خانم|دکتر|جناب\s*آقای|جناب)\s+/g, '')
+    .replace(/[\s\u200B-\u200D\uFEFF\u00A0\-\_\.]+/g, '');
+}
+
+export function isSamePersonName(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a.trim() === b.trim()) return true;
+  const ka = normalizePersonNameKey(a);
+  const kb = normalizePersonNameKey(b);
+  return Boolean(ka && kb && ka === kb);
+}
+
+/**
  * Splits a shift person string (e.g., "حیدری / دهقان") and combines with extraPersons array
  */
 export function getDayParticipants(entry: ShiftEntry): string[] {
@@ -123,16 +147,16 @@ export function getPersonRolesInShift(
   }
   const dayAll = getDayParticipants(entry);
   const nightAll = getNightParticipants(entry);
-  const isDay = dayAll.includes(personName);
-  const isNight = nightAll.includes(personName);
-  const isOnCall = (entry.onCallPerson || '').trim() === personName;
+  const isDay = dayAll.some((p) => isSamePersonName(p, personName));
+  const isNight = nightAll.some((p) => isSamePersonName(p, personName));
+  const isOnCall = isSamePersonName(entry.onCallPerson || '', personName);
 
   return {
     isDay,
     isNight,
     isOnCall,
-    dayCoWorkers: dayAll.filter((p) => p !== personName),
-    nightCoWorkers: nightAll.filter((p) => p !== personName),
+    dayCoWorkers: dayAll.filter((p) => !isSamePersonName(p, personName)),
+    nightCoWorkers: nightAll.filter((p) => !isSamePersonName(p, personName)),
   };
 }
 
@@ -549,6 +573,132 @@ export function detectScheduleChangesForPerson(
   }
 
   return notifications;
+}
+
+/**
+ * Detects shift changes both for `settings.selectedPerson` (personalized) AND for all
+ * involved personnel (`افراد درگیر`) whenever a shift swap/modification occurs.
+ * Guarantees immediate OS + in-app notification on both the device performing the swap
+ * and all synced devices.
+ */
+export function detectAllInvolvedScheduleChanges(
+  oldSchedule: ShiftEntry[],
+  newSchedule: ShiftEntry[],
+  settings: UserAndroidSettings
+): ShiftNotificationItem[] {
+  if (!oldSchedule.length || !newSchedule.length || !settings.notifyOnShiftChange) return [];
+
+  const personalNotifs = settings.selectedPerson
+    ? detectScheduleChangesForPerson(oldSchedule, newSchedule, settings.selectedPerson, settings)
+    : [];
+
+  const coveredKeys = new Set(personalNotifs.map((n) => `${n.shiftDate}_${n.shiftKind}`));
+
+  const oldMap = new Map<string, ShiftEntry>();
+  for (const item of oldSchedule) {
+    oldMap.set(item.date, item);
+  }
+
+  const involvedNotifs: ShiftNotificationItem[] = [];
+  const nowIso = new Date().toISOString();
+  const persianTime = getNowPersianTimeStr();
+  const ownerLabel = settings.selectedPerson || 'همه افراد درگیر';
+
+  for (const newEntry of newSchedule) {
+    const oldEntry = oldMap.get(newEntry.date);
+    if (!oldEntry) continue;
+
+    const dateFa = toPersianDigits(newEntry.date);
+
+    // 1. Check Day Shift Changes for Involved People
+    if (!coveredKeys.has(`${newEntry.date}_Day`)) {
+      const oldDay = getDayParticipants(oldEntry);
+      const newDay = getDayParticipants(newEntry);
+      const removedDay = oldDay.filter((p) => !newDay.some((np) => isSamePersonName(np, p)));
+      const addedDay = newDay.filter((p) => !oldDay.some((op) => isSamePersonName(op, p)));
+
+      if (removedDay.length > 0 || addedDay.length > 0) {
+        const involvedParts: string[] = [];
+        if (removedDay.length > 0 && addedDay.length > 0) {
+          involvedParts.push(`${removedDay.join(' و ')} (برداشته شد) ⇄ ${addedDay.join(' و ')} (جایگزین شد)`);
+        } else if (addedDay.length > 0) {
+          involvedParts.push(`${addedDay.join(' و ')} به شیفت روز اضافه شد`);
+        } else if (removedDay.length > 0) {
+          involvedParts.push(`${removedDay.join(' و ')} از شیفت روز حذف شد`);
+        }
+
+        involvedNotifs.push({
+          id: `inv-day-${newEntry.date}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: nowIso,
+          persianTime,
+          personName: ownerLabel,
+          type: addedDay.length > 0 ? 'swap_added' : 'swap_removed',
+          title: `جابجایی شیفت روز (${newEntry.dayName} ${dateFa})`,
+          message: `تغییر در شیفت روز ${newEntry.dayName} مورخ ${dateFa} — افراد درگیر: ${involvedParts.join(' | ')}`,
+          shiftDate: newEntry.date,
+          shiftDayName: newEntry.dayName,
+          shiftKind: 'Day',
+          read: false,
+        });
+      }
+    }
+
+    // 2. Check Night Shift Changes for Involved People
+    if (!coveredKeys.has(`${newEntry.date}_Night`)) {
+      const oldNight = getNightParticipants(oldEntry);
+      const newNight = getNightParticipants(newEntry);
+      const removedNight = oldNight.filter((p) => !newNight.some((np) => isSamePersonName(np, p)));
+      const addedNight = newNight.filter((p) => !oldNight.some((op) => isSamePersonName(op, p)));
+
+      if (removedNight.length > 0 || addedNight.length > 0) {
+        const involvedParts: string[] = [];
+        if (removedNight.length > 0 && addedNight.length > 0) {
+          involvedParts.push(`${removedNight.join(' و ')} (برداشته شد) ⇄ ${addedNight.join(' و ')} (جایگزین شد)`);
+        } else if (addedNight.length > 0) {
+          involvedParts.push(`${addedNight.join(' و ')} به شیفت شب اضافه شد`);
+        } else if (removedNight.length > 0) {
+          involvedParts.push(`${removedNight.join(' و ')} از شیفت شب حذف شد`);
+        }
+
+        involvedNotifs.push({
+          id: `inv-night-${newEntry.date}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: nowIso,
+          persianTime,
+          personName: ownerLabel,
+          type: addedNight.length > 0 ? 'swap_added' : 'swap_removed',
+          title: `جابجایی شیفت شب (${newEntry.dayName} ${dateFa})`,
+          message: `تغییر در شیفت شب ${newEntry.dayName} مورخ ${dateFa} — افراد درگیر: ${involvedParts.join(' | ')}`,
+          shiftDate: newEntry.date,
+          shiftDayName: newEntry.dayName,
+          shiftKind: 'Night',
+          read: false,
+        });
+      }
+    }
+
+    // 3. Check On-Call Supervisor Changes
+    if (!coveredKeys.has(`${newEntry.date}_OnCall`)) {
+      const oldSup = (oldEntry.onCallPerson || '').trim();
+      const newSup = (newEntry.onCallPerson || '').trim();
+      if (oldSup && newSup && !isSamePersonName(oldSup, newSup)) {
+        involvedNotifs.push({
+          id: `inv-sup-${newEntry.date}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: nowIso,
+          persianTime,
+          personName: ownerLabel,
+          type: 'swap_added',
+          title: `تغییر سرپرست کشیک (${newEntry.dayName} ${dateFa})`,
+          message: `سرپرست کشیک ${newEntry.dayName} مورخ ${dateFa} از ${oldSup} به ${newSup} تغییر یافت.`,
+          shiftDate: newEntry.date,
+          shiftDayName: newEntry.dayName,
+          shiftKind: 'OnCall',
+          read: false,
+        });
+      }
+    }
+  }
+
+  return [...personalNotifs, ...involvedNotifs];
 }
 
 /**

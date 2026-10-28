@@ -16,7 +16,7 @@ import { ShiftEntry, Personnel, AppData, PublishedRange, DailyProcessMap, Proces
 import { Settings, Plus, Trash2, Save, ArrowUp, ArrowDown, UserCog, Users, ArrowRightLeft, AlertCircle, AlertTriangle, CheckCircle2, Edit, Calendar as CalendarIcon, List, Table as TableIcon, Check, Lock, X, KeyRound, CalendarPlus, Crown, LogOut, ShieldCheck, Palette, Cloud, CloudUpload, Wifi, RefreshCw, UserPlus, Sun, Moon, Sparkles, FlaskConical, Server, SlidersHorizontal } from 'lucide-react';
 import { getTodayPersianParts, getDayNameForJalali, toPersianDigits, getNextJalaliDate } from './utils/persianDate';
 import { getNextPersonnelColor, getPersonColor, ensureUniquePersonnelColors, upgradeToVibrantPersonnel } from './utils/personnelColors';
-import { subscribeToCloudRoster, saveCloudRoster, resetCloudRoster, subscribeSyncStatus, SyncStatusDetails } from './utils/firebase';
+import { subscribeToCloudRoster, saveCloudRoster, resetCloudRoster, subscribeSyncStatus, SyncStatusDetails, getSyncApiBase, setLocalScheduleFingerprint } from './utils/firebase';
 import { unifyPersonnelAndShifts } from './utils/customFormatHandler';
 import { DEFAULT_PROCESS_DEFINITIONS, generateFullBioprocessCampaign } from './utils/bioprocessData';
 
@@ -387,12 +387,14 @@ const App: React.FC = () => {
   const handleForceSync = async () => {
     setIsForceSyncing(true);
     try {
-      const res = await fetch('/api/sync');
+      const apiBase = getSyncApiBase();
+      const res = await fetch(`${apiBase}/api/sync?_t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const json = await res.json();
         if (json.exists && json.data) {
           const cloudData = json.data;
           if (cloudData.schedule && Array.isArray(cloudData.schedule)) {
+            setLocalScheduleFingerprint(cloudData.schedule);
             setSchedule(cloudData.schedule);
             localStorage.setItem(STORAGE_KEYS.SCHEDULE, JSON.stringify(cloudData.schedule));
           }
@@ -464,7 +466,16 @@ const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, []);
 
-  // Subscribe to real-time updates from Firestore
+  const personnelListRef = useRef<Personnel[]>(personnelList);
+  useEffect(() => {
+    personnelListRef.current = personnelList;
+  }, [personnelList]);
+
+  useEffect(() => {
+    setLocalScheduleFingerprint(schedule);
+  }, []);
+
+  // Subscribe to real-time updates from Server & Firestore
   useEffect(() => {
     const unsubscribe = subscribeToCloudRoster(
       (cloudData) => {
@@ -477,10 +488,8 @@ const App: React.FC = () => {
         if (cloudData.schedule && Array.isArray(cloudData.schedule) && cloudData.schedule.length > 0) {
           const non1404 = cloudData.schedule.filter(s => !s.date.startsWith('1404'));
           const cleanSchedule = non1404.length > 0 ? non1404 : SCHEDULE_DATA;
-          const had1404 = cloudData.schedule.some(s => s.date.startsWith('1404'));
 
           // Mathematically calculate and normalize dayName for every shift based on exact Jalali date
-          let hasDayNameFixes = false;
           const normalizedSchedule = cleanSchedule.map(entry => {
             const parts = entry.date.split('/');
             if (parts.length === 3) {
@@ -490,7 +499,6 @@ const App: React.FC = () => {
               if (y && m && d) {
                 const correctDay = getDayNameForJalali(y, m, d);
                 if (entry.dayName !== correctDay) {
-                  hasDayNameFixes = true;
                   return { ...entry, dayName: correctDay };
                 }
               }
@@ -500,9 +508,10 @@ const App: React.FC = () => {
 
           const cloudPersonnel = (cloudData.personnelList && Array.isArray(cloudData.personnelList) && cloudData.personnelList.length > 0) 
             ? cloudData.personnelList 
-            : personnelList;
+            : personnelListRef.current;
           const { updated } = upgradeToVibrantPersonnel(cloudPersonnel);
           const { unifiedShifts, unifiedPersonnel } = unifyPersonnelAndShifts(normalizedSchedule, updated, updated);
+          setLocalScheduleFingerprint(unifiedShifts);
           setSchedule(unifiedShifts);
           setPersonnelList(unifiedPersonnel);
           try {
@@ -1197,6 +1206,7 @@ const App: React.FC = () => {
 
   const syncUpdatedSchedule = (newSchedule: ShiftEntry[]) => {
     const now = new Date().toISOString();
+    setLocalScheduleFingerprint(newSchedule);
     try {
       localStorage.setItem(STORAGE_KEYS.SCHEDULE, JSON.stringify(newSchedule));
       localStorage.setItem(STORAGE_KEYS.UPDATED_AT, now);
@@ -1221,7 +1231,7 @@ const App: React.FC = () => {
       })
         .then(() => setSyncStatus('synced'))
         .catch(() => setSyncStatus('synced'));
-    }, 250);
+    }, 25);
   };
 
   const handleUpdateShift = (id: number, field: 'dayShiftPerson' | 'nightShiftPerson' | 'onCallPerson', value: string) => {

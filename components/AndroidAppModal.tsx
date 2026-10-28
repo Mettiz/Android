@@ -44,6 +44,8 @@ import {
   USER_LAST_SCHEDULE_SNAPSHOT_KEY,
   USER_LAST_DAILY_REMINDER_KEY,
   detectScheduleChangesForPerson,
+  detectAllInvolvedScheduleChanges,
+  isSamePersonName,
   buildDailyShiftReminder,
   getPersonRolesInShift,
   playNotificationChime,
@@ -460,11 +462,11 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
     currentMonthCode,
   ]);
 
-  // 1. Real-Time Shift Swap / Removal / Addition Watcher
+  // 1. Real-Time Shift Swap / Removal / Addition Watcher (Personal + All Involved People)
   useEffect(() => {
     if (!schedule || schedule.length === 0) return;
 
-    // Load last saved snapshot from localStorage if ref is null (detects changes that happened while app was closed)
+    // Use in-memory baseline first; only fall back to localStorage on initial cold start
     let baseline = prevScheduleRef.current;
     if (!baseline) {
       try {
@@ -475,13 +477,8 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
       } catch {}
     }
 
-    if (baseline && settings.selectedPerson) {
-      const detected = detectScheduleChangesForPerson(
-        baseline,
-        schedule,
-        settings.selectedPerson,
-        settings
-      );
+    if (baseline && baseline !== schedule) {
+      const detected = detectAllInvolvedScheduleChanges(baseline, schedule, settings);
 
       if (detected.length > 0) {
         setNotifHistory((prev) => {
@@ -501,7 +498,12 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
       }
     }
 
-    prevScheduleRef.current = schedule;
+    // Clone schedule entries so future comparisons are never affected by reference sharing
+    prevScheduleRef.current = schedule.map((s) => ({
+      ...s,
+      extraDayPersons: s.extraDayPersons ? [...s.extraDayPersons] : undefined,
+      extraNightPersons: s.extraNightPersons ? [...s.extraNightPersons] : undefined,
+    }));
     try {
       localStorage.setItem(USER_LAST_SCHEDULE_SNAPSHOT_KEY, JSON.stringify(schedule));
     } catch {}
@@ -550,10 +552,15 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
     dailyProcesses,
   ]);
 
-  // Filter notifications for currently selected person (or all if none selected)
+  // Filter notifications for currently selected person (plus general involved-people alerts)
   const userNotifications = useMemo(() => {
     if (!settings.selectedPerson) return notifHistory;
-    return notifHistory.filter((n) => n.personName === settings.selectedPerson);
+    return notifHistory.filter(
+      (n) =>
+        isSamePersonName(n.personName, settings.selectedPerson) ||
+        n.personName === 'همه افراد درگیر' ||
+        n.message.includes(settings.selectedPerson)
+    );
   }, [notifHistory, settings.selectedPerson]);
 
   const unreadCount = useMemo(
@@ -564,7 +571,10 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
   const handleMarkAllRead = () => {
     setNotifHistory((prev) => {
       const updated = prev.map((n) =>
-        !settings.selectedPerson || n.personName === settings.selectedPerson
+        !settings.selectedPerson ||
+        isSamePersonName(n.personName, settings.selectedPerson) ||
+        n.personName === 'همه افراد درگیر' ||
+        n.message.includes(settings.selectedPerson)
           ? { ...n, read: true }
           : n
       );
@@ -576,7 +586,11 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
   const handleClearNotifications = () => {
     setNotifHistory((prev) => {
       const updated = settings.selectedPerson
-        ? prev.filter((n) => n.personName !== settings.selectedPerson)
+        ? prev.filter(
+            (n) =>
+              !isSamePersonName(n.personName, settings.selectedPerson) &&
+              n.personName !== 'همه افراد درگیر'
+          )
         : [];
       saveNotificationHistory(updated);
       return updated;
