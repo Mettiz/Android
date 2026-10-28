@@ -51,42 +51,39 @@ jobs:
 
           if [ -f "package.json" ]; then
             echo "=== Normalizing package.json for public npm registry ==="
-            node -e '
-              const fs = require("fs");
-              const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
-              delete p.engines;
-              const pinMap = {
-                "react": "^19.0.0",
-                "react-dom": "^19.0.0",
-                "lucide-react": "latest",
-                "recharts": "latest",
-                "xlsx": "^0.18.5",
-                "firebase": "latest",
-                "pdfjs-dist": "^4.10.38",
-                "@google/genai": "latest",
-                "cors": "latest",
-                "express": "^4.21.2",
-                "vite": "^6.0.0",
-                "@vitejs/plugin-react": "^4.3.4",
-                "vite-plugin-pwa": "latest",
-                "typescript": "~5.7.2",
-                "tsx": "latest",
-                "@types/node": "latest",
-                "@types/express": "latest",
-                "@types/cors": "latest"
-              };
-              for (const sec of ["dependencies", "devDependencies"]) {
-                if (!p[sec]) continue;
-                for (const k of Object.keys(p[sec])) {
-                  if (k.startsWith("@capacitor/")) {
-                    delete p[sec][k];
-                  } else {
-                    p[sec][k] = pinMap[k] || "latest";
-                  }
-                }
-              }
-              fs.writeFileSync("package.json", JSON.stringify(p, null, 2));
-            '
+            python3 -c '
+          import json
+          p = json.load(open("package.json", "r", encoding="utf-8"))
+          p.pop("engines", None)
+          pin_map = {
+              "react": "^19.0.0",
+              "react-dom": "^19.0.0",
+              "lucide-react": "latest",
+              "recharts": "latest",
+              "xlsx": "^0.18.5",
+              "firebase": "latest",
+              "pdfjs-dist": "^4.10.38",
+              "@google/genai": "latest",
+              "cors": "latest",
+              "express": "^4.21.2",
+              "vite": "^6.0.0",
+              "@vitejs/plugin-react": "^4.3.4",
+              "vite-plugin-pwa": "latest",
+              "typescript": "~5.7.2",
+              "tsx": "latest",
+              "@types/node": "latest",
+              "@types/express": "latest",
+              "@types/cors": "latest"
+          }
+          for sec in ["dependencies", "devDependencies"]:
+              if sec in p and isinstance(p[sec], dict):
+                  for k in list(p[sec].keys()):
+                      if k.startswith("@capacitor/"):
+                          del p[sec][k]
+                      else:
+                          p[sec][k] = pin_map.get(k, "latest")
+          json.dump(p, open("package.json", "w", encoding="utf-8"), indent=2)
+          '
             rm -f package-lock.json bun.lock bun.lockb
             echo "=== Installing npm dependencies ==="
             npm install --legacy-peer-deps --no-audit --no-fund || npm install --force --no-audit --no-fund
@@ -95,16 +92,17 @@ jobs:
             npm run build
             if [ ! -f "dist/index.html" ]; then
               echo "=== Fallback: building with minimal Vite config ==="
-              cat << 'VITEEOF' > vite.ci.config.mjs
-              import path from 'path';
-              import { defineConfig } from 'vite';
-              import react from '@vitejs/plugin-react';
-              export default defineConfig({
-                plugins: [react()],
-                resolve: { alias: { '@': path.resolve('.') } },
-                build: { target: 'esnext', outDir: 'dist', emptyOutDir: true, chunkSizeWarningLimit: 3000 }
-              });
-              VITEEOF
+              python3 -c '
+          open("vite.ci.config.mjs", "w", encoding="utf-8").write("""import path from "path";
+          import { defineConfig } from "vite";
+          import react from "@vitejs/plugin-react";
+          export default defineConfig({
+            plugins: [react()],
+            resolve: { alias: { "@": path.resolve(".") } },
+            build: { target: "esnext", outDir: "dist", emptyOutDir: true, chunkSizeWarningLimit: 3000 }
+          });
+          """)
+          '
               npx vite build --config vite.ci.config.mjs
               rm -f vite.ci.config.mjs
             fi
@@ -146,9 +144,7 @@ jobs:
           elif [ -f "index.html" ]; then
             cp index.html "$WORK/assets/public/"
           else
-            cat << 'HTMLEOF' > "$WORK/assets/public/index.html"
-            <!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ShiftFlow FMD</title></head><body style="font-family:sans-serif;text-align:center;padding:2rem;"><h2>ShiftFlow FMD v3.0.0</h2></body></html>
-            HTMLEOF
+            printf '<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ShiftFlow FMD</title></head><body><h2>ShiftFlow FMD v3.0.0</h2></body></html>\n' > "$WORK/assets/public/index.html"
           fi
           rm -f "$WORK/assets/public/"*.apk "$WORK/assets/public/"*.zip "$WORK/assets/public/"*.yml "$WORK/assets/public/"*.keystore
 
