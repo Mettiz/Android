@@ -16,9 +16,10 @@ import { ShiftEntry, Personnel, AppData, PublishedRange, DailyProcessMap, Proces
 import { Settings, Plus, Trash2, Save, ArrowUp, ArrowDown, UserCog, Users, ArrowRightLeft, AlertCircle, AlertTriangle, CheckCircle2, Edit, Calendar as CalendarIcon, List, Table as TableIcon, Check, Lock, X, KeyRound, CalendarPlus, Crown, LogOut, ShieldCheck, Palette, Cloud, CloudUpload, Wifi, RefreshCw, UserPlus, Sun, Moon, Sparkles, FlaskConical, Server, SlidersHorizontal } from 'lucide-react';
 import { getTodayPersianParts, getDayNameForJalali, toPersianDigits, getNextJalaliDate } from './utils/persianDate';
 import { getNextPersonnelColor, getPersonColor, ensureUniquePersonnelColors, upgradeToVibrantPersonnel } from './utils/personnelColors';
-import { subscribeToCloudRoster, saveCloudRoster, resetCloudRoster, subscribeSyncStatus, SyncStatusDetails, getSyncApiBase, setLocalScheduleFingerprint } from './utils/firebase';
+import { subscribeToCloudRoster, saveCloudRoster, resetCloudRoster, subscribeSyncStatus, SyncStatusDetails, getSyncApiBase, setLocalScheduleFingerprint, fetchLatestCloudRosterNow } from './utils/firebase';
 import { unifyPersonnelAndShifts } from './utils/customFormatHandler';
 import { DEFAULT_PROCESS_DEFINITIONS, generateFullBioprocessCampaign } from './utils/bioprocessData';
+import { dispatchScheduleChangeNotifications } from './utils/shiftNotifications';
 
 const MONTHS = [
     { name: 'فروردین', code: '01' },
@@ -387,56 +388,52 @@ const App: React.FC = () => {
   const handleForceSync = async () => {
     setIsForceSyncing(true);
     try {
-      const apiBase = getSyncApiBase();
-      const res = await fetch(`${apiBase}/api/sync?_t=${Date.now()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.exists && json.data) {
-          const cloudData = json.data;
-          if (cloudData.schedule && Array.isArray(cloudData.schedule)) {
-            setLocalScheduleFingerprint(cloudData.schedule);
-            setSchedule(cloudData.schedule);
-            localStorage.setItem(STORAGE_KEYS.SCHEDULE, JSON.stringify(cloudData.schedule));
-          }
-          if (cloudData.personnelList && Array.isArray(cloudData.personnelList)) {
-            setPersonnelList(cloudData.personnelList);
-            localStorage.setItem(STORAGE_KEYS.PERSONNEL, JSON.stringify(cloudData.personnelList));
-          }
-          if (cloudData.unlockedMonths && Array.isArray(cloudData.unlockedMonths)) {
-            setUnlockedMonths(cloudData.unlockedMonths);
-            localStorage.setItem(STORAGE_KEYS.LOCKED, JSON.stringify(cloudData.unlockedMonths));
-          }
-          if (cloudData.publishedRange !== undefined) {
-            setPublishedRange(cloudData.publishedRange);
-            if (cloudData.publishedRange && cloudData.publishedRange.isActive) {
-              localStorage.setItem(STORAGE_KEYS.PUBLISHED_RANGE, JSON.stringify(cloudData.publishedRange));
-            } else {
-              localStorage.removeItem(STORAGE_KEYS.PUBLISHED_RANGE);
-            }
-          }
-          if (cloudData.adminPassword) {
-            setAdminPassword(cloudData.adminPassword);
-            localStorage.setItem(STORAGE_KEYS.PASSWORD, cloudData.adminPassword);
-          }
-          if (cloudData.dailyProcesses) {
-            setDailyProcesses(cloudData.dailyProcesses);
-            localStorage.setItem(STORAGE_KEYS.DAILY_PROCESSES, JSON.stringify(cloudData.dailyProcesses));
-          }
-          if (cloudData.processDefinitions) {
-            setProcessDefinitions(cloudData.processDefinitions);
-            localStorage.setItem(STORAGE_KEYS.PROCESS_DEFINITIONS, JSON.stringify(cloudData.processDefinitions));
-          }
-          if (cloudData.showProcessSchedule !== undefined) {
-            setShowProcessSchedule(cloudData.showProcessSchedule);
-            localStorage.setItem(STORAGE_KEYS.SHOW_PROCESS_SCHEDULE, String(cloudData.showProcessSchedule));
-          }
-          setSyncStatus('synced');
-          setSaveNotice({
-            type: 'success',
-            message: 'همگام‌سازی مستقیم با سرور با موفقیت انجام شد و جدیدترین داده‌ها دریافت گردید.'
-          });
-          setTimeout(() => setSaveNotice(null), 4000);
+      const cloudData = await fetchLatestCloudRosterNow();
+      if (cloudData) {
+        if (cloudData.schedule && Array.isArray(cloudData.schedule)) {
+          dispatchScheduleChangeNotifications(scheduleRef.current, cloudData.schedule);
+          setLocalScheduleFingerprint(cloudData.schedule);
+          setSchedule(cloudData.schedule);
+          localStorage.setItem(STORAGE_KEYS.SCHEDULE, JSON.stringify(cloudData.schedule));
         }
+        if (cloudData.personnelList && Array.isArray(cloudData.personnelList)) {
+          setPersonnelList(cloudData.personnelList);
+          localStorage.setItem(STORAGE_KEYS.PERSONNEL, JSON.stringify(cloudData.personnelList));
+        }
+        if (cloudData.unlockedMonths && Array.isArray(cloudData.unlockedMonths)) {
+          setUnlockedMonths(cloudData.unlockedMonths);
+          localStorage.setItem(STORAGE_KEYS.LOCKED, JSON.stringify(cloudData.unlockedMonths));
+        }
+        if (cloudData.publishedRange !== undefined) {
+          setPublishedRange(cloudData.publishedRange);
+          if (cloudData.publishedRange && cloudData.publishedRange.isActive) {
+            localStorage.setItem(STORAGE_KEYS.PUBLISHED_RANGE, JSON.stringify(cloudData.publishedRange));
+          } else {
+            localStorage.removeItem(STORAGE_KEYS.PUBLISHED_RANGE);
+          }
+        }
+        if (cloudData.adminPassword) {
+          setAdminPassword(cloudData.adminPassword);
+          localStorage.setItem(STORAGE_KEYS.PASSWORD, cloudData.adminPassword);
+        }
+        if (cloudData.dailyProcesses) {
+          setDailyProcesses(cloudData.dailyProcesses);
+          localStorage.setItem(STORAGE_KEYS.DAILY_PROCESSES, JSON.stringify(cloudData.dailyProcesses));
+        }
+        if (cloudData.processDefinitions) {
+          setProcessDefinitions(cloudData.processDefinitions);
+          localStorage.setItem(STORAGE_KEYS.PROCESS_DEFINITIONS, JSON.stringify(cloudData.processDefinitions));
+        }
+        if (cloudData.showProcessSchedule !== undefined) {
+          setShowProcessSchedule(cloudData.showProcessSchedule);
+          localStorage.setItem(STORAGE_KEYS.SHOW_PROCESS_SCHEDULE, String(cloudData.showProcessSchedule));
+        }
+        setSyncStatus('synced');
+        setSaveNotice({
+          type: 'success',
+          message: 'همگام‌سازی مستقیم با سرور با موفقیت انجام شد و جدیدترین داده‌ها دریافت گردید.'
+        });
+        setTimeout(() => setSaveNotice(null), 4000);
       }
     } catch (err) {
       console.warn('Force sync error:', err);
@@ -470,6 +467,11 @@ const App: React.FC = () => {
   useEffect(() => {
     personnelListRef.current = personnelList;
   }, [personnelList]);
+
+  const scheduleRef = useRef<ShiftEntry[]>(schedule);
+  useEffect(() => {
+    scheduleRef.current = schedule;
+  }, [schedule]);
 
   useEffect(() => {
     setLocalScheduleFingerprint(schedule);
@@ -511,6 +513,7 @@ const App: React.FC = () => {
             : personnelListRef.current;
           const { updated } = upgradeToVibrantPersonnel(cloudPersonnel);
           const { unifiedShifts, unifiedPersonnel } = unifyPersonnelAndShifts(normalizedSchedule, updated, updated);
+          dispatchScheduleChangeNotifications(scheduleRef.current, unifiedShifts);
           setLocalScheduleFingerprint(unifiedShifts);
           setSchedule(unifiedShifts);
           setPersonnelList(unifiedPersonnel);
@@ -1265,6 +1268,7 @@ const App: React.FC = () => {
         );
       }
 
+      dispatchScheduleChangeNotifications(prev, newSched);
       syncUpdatedSchedule(newSched);
       return newSched;
     });
@@ -1307,6 +1311,7 @@ const App: React.FC = () => {
         return item;
       });
 
+      dispatchScheduleChangeNotifications(prev, newSched);
       syncUpdatedSchedule(newSched);
       return newSched;
     });
@@ -1326,6 +1331,7 @@ const App: React.FC = () => {
         }
         return item;
       });
+      dispatchScheduleChangeNotifications(prev, newSched);
       syncUpdatedSchedule(newSched);
       return newSched;
     });
@@ -1365,6 +1371,7 @@ const App: React.FC = () => {
         return item;
       });
 
+      dispatchScheduleChangeNotifications(prev, newSched);
       syncUpdatedSchedule(newSched);
       return newSched;
     });
@@ -1607,6 +1614,7 @@ const App: React.FC = () => {
                   }
                   return item;
               });
+              dispatchScheduleChangeNotifications(prev, newSched);
               syncUpdatedSchedule(newSched);
               return newSched;
           });

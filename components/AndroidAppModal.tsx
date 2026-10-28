@@ -45,6 +45,7 @@ import {
   USER_LAST_DAILY_REMINDER_KEY,
   detectScheduleChangesForPerson,
   detectAllInvolvedScheduleChanges,
+  dispatchScheduleChangeNotifications,
   isSamePersonName,
   buildDailyShiftReminder,
   getPersonRolesInShift,
@@ -110,8 +111,8 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ className = 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [releaseInfo, setReleaseInfo] = useState<GitHubReleaseInfo>({
-    tagName: 'Latest',
-    name: 'آخرین نسخه منتشرشده ShiftFlow FMD Android',
+    tagName: 'v4.0.0',
+    name: 'ShiftFlow FMD Android v4.0.0',
     publishedAt: '',
     htmlUrl: LATEST_RELEASE_PAGE_URL,
     apkDownloadUrl: LATEST_APK_DIRECT_URL,
@@ -140,9 +141,14 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ className = 
             pubDate = new Date(data.published_at).toLocaleDateString('fa-IR');
           } catch {}
         }
+        const rawTag = data.tag_name && data.tag_name !== 'v3.0.0' ? data.tag_name : 'v4.0.0';
+        const rawName =
+          data.name && !String(data.name).includes('v3.0.0')
+            ? data.name
+            : `ShiftFlow FMD Android ${rawTag}`;
         setReleaseInfo({
-          tagName: data.tag_name || 'Latest',
-          name: data.name || `ShiftFlow FMD Android (${data.tag_name || 'Latest'})`,
+          tagName: rawTag,
+          name: rawName,
           publishedAt: pubDate,
           htmlUrl: data.html_url || LATEST_RELEASE_PAGE_URL,
           apkDownloadUrl: apkAsset?.browser_download_url || LATEST_APK_DIRECT_URL,
@@ -462,6 +468,29 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
     currentMonthCode,
   ]);
 
+  // Listen to direct synchronous shift swap notifications dispatched from App.tsx or cloud sync
+  useEffect(() => {
+    const handleNotifEvent = (e: Event) => {
+      const custom = e as CustomEvent<{
+        added?: ShiftNotificationItem[];
+        history?: ShiftNotificationItem[];
+        latest?: ShiftNotificationItem;
+      }>;
+      if (custom.detail?.history) {
+        setNotifHistory(custom.detail.history);
+      } else {
+        setNotifHistory(loadNotificationHistory());
+      }
+      if (custom.detail?.latest) {
+        setLiveBannerNotif(custom.detail.latest);
+      }
+    };
+    window.addEventListener('shiftflow-notifications-updated', handleNotifEvent);
+    return () => {
+      window.removeEventListener('shiftflow-notifications-updated', handleNotifEvent);
+    };
+  }, []);
+
   // 1. Real-Time Shift Swap / Removal / Addition Watcher (Personal + All Involved People)
   useEffect(() => {
     if (!schedule || schedule.length === 0) return;
@@ -478,24 +507,7 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
     }
 
     if (baseline && baseline !== schedule) {
-      const detected = detectAllInvolvedScheduleChanges(baseline, schedule, settings);
-
-      if (detected.length > 0) {
-        setNotifHistory((prev) => {
-          const updated = [...detected, ...prev].slice(0, 60);
-          saveNotificationHistory(updated);
-          return updated;
-        });
-
-        // Show live banner + sound + haptic + OS phone notification for EVERY detected change
-        const latest = detected[0];
-        setLiveBannerNotif(latest);
-        playNotificationChime(settings.soundEnabled);
-        triggerAndroidHaptic([70, 50, 120], settings.hapticEnabled);
-        for (const item of detected.slice(0, 3)) {
-          sendNativeAndroidNotification(item.title, item.message, item.id);
-        }
-      }
+      dispatchScheduleChangeNotifications(baseline, schedule);
     }
 
     // Clone schedule entries so future comparisons are never affected by reference sharing

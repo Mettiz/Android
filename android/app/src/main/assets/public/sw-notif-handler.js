@@ -49,6 +49,14 @@ function getRoles(entry, personName) {
   };
 }
 
+// Purge any stale Workbox precaches immediately so new app versions load fresh
+if (typeof caches !== 'undefined') {
+  caches
+    .keys()
+    .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+    .catch(() => {});
+}
+
 async function checkServerScheduleInBackground() {
   if (!BG_STATE.notifyOnShiftChange) return;
   try {
@@ -89,6 +97,16 @@ async function checkServerScheduleInBackground() {
       const oldEntry = oldMap.get(newEntry.date);
       if (!oldEntry) continue;
 
+      const oldDay = splitParticipants(oldEntry.dayShiftPerson, oldEntry.extraDayPersons);
+      const newDay = splitParticipants(newEntry.dayShiftPerson, newEntry.extraDayPersons);
+      const removedDay = oldDay.filter((p) => !newDay.some((np) => isSamePerson(np, p)));
+      const addedDay = newDay.filter((p) => !oldDay.some((op) => isSamePerson(op, p)));
+
+      const oldNight = splitParticipants(oldEntry.nightShiftPerson, oldEntry.extraNightPersons);
+      const newNight = splitParticipants(newEntry.nightShiftPerson, newEntry.extraNightPersons);
+      const removedNight = oldNight.filter((p) => !newNight.some((np) => isSamePerson(np, p)));
+      const addedNight = newNight.filter((p) => !oldNight.some((op) => isSamePerson(op, p)));
+
       if (person) {
         const oldR = getRoles(oldEntry, person);
         const newR = getRoles(newEntry, person);
@@ -97,7 +115,7 @@ async function checkServerScheduleInBackground() {
           await self.registration.showNotification(
             `جابجایی/حذف از شیفت روز (${newEntry.dayName} ${newEntry.date})`,
             {
-              body: `${person} عزیز، شما از شیفت روز ${newEntry.dayName} (${newEntry.date}) برداشته شدید.`,
+              body: `${person} عزیز، شما از شیفت روز ${newEntry.dayName} (${newEntry.date}) برداشته شدید (جایگزین: ${newDay.join(' و ') || 'نامشخص'}).`,
               icon: '/pwa-192x192.png',
               badge: '/pwa-192x192.png',
               dir: 'rtl',
@@ -131,7 +149,7 @@ async function checkServerScheduleInBackground() {
           await self.registration.showNotification(
             `جابجایی/حذف از شیفت شب (${newEntry.dayName} ${newEntry.date})`,
             {
-              body: `${person} عزیز، شما از شیفت شب ${newEntry.dayName} (${newEntry.date}) برداشته شدید.`,
+              body: `${person} عزیز، شما از شیفت شب ${newEntry.dayName} (${newEntry.date}) برداشته شدید (جایگزین: ${newNight.join(' و ') || 'نامشخص'}).`,
               icon: '/pwa-192x192.png',
               badge: '/pwa-192x192.png',
               dir: 'rtl',
@@ -160,6 +178,38 @@ async function checkServerScheduleInBackground() {
           );
           continue;
         }
+      }
+
+      if (removedDay.length > 0 || addedDay.length > 0) {
+        await self.registration.showNotification(
+          `جابجایی شیفت روز (${newEntry.dayName} ${newEntry.date})`,
+          {
+            body: `تغییر در شیفت روز ${newEntry.dayName} (${newEntry.date}) — افراد درگیر: ${removedDay.join(' و ') || '---'} ⇄ ${addedDay.join(' و ') || '---'}`,
+            icon: '/pwa-192x192.png',
+            badge: '/pwa-192x192.png',
+            dir: 'rtl',
+            lang: 'fa',
+            vibrate: [200, 100, 250, 100, 300],
+            tag: `sw-inv-day-${newEntry.date}-${Date.now()}`,
+            renotify: true,
+          }
+        );
+      }
+
+      if (removedNight.length > 0 || addedNight.length > 0) {
+        await self.registration.showNotification(
+          `جابجایی شیفت شب (${newEntry.dayName} ${newEntry.date})`,
+          {
+            body: `تغییر در شیفت شب ${newEntry.dayName} (${newEntry.date}) — افراد درگیر: ${removedNight.join(' و ') || '---'} ⇄ ${addedNight.join(' و ') || '---'}`,
+            icon: '/pwa-192x192.png',
+            badge: '/pwa-192x192.png',
+            dir: 'rtl',
+            lang: 'fa',
+            vibrate: [200, 100, 250, 100, 300],
+            tag: `sw-inv-night-${newEntry.date}-${Date.now()}`,
+            renotify: true,
+          }
+        );
       }
     }
   } catch (e) {

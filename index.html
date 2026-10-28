@@ -61,17 +61,24 @@
           }
         }, true);
 
-        // Register clean PWA Service Worker and remove any Vite dev-sw module worker
+        // Purge any stale Workbox precaches and register clean PWA Service Worker
+        if ('caches' in window) {
+          caches.keys().then(function(keys) {
+            keys.forEach(function(k) { caches.delete(k); });
+          }).catch(function() {});
+        }
         if ('serviceWorker' in navigator) {
           window.addEventListener('load', function() {
             navigator.serviceWorker.getRegistrations().then(function(regs) {
               regs.forEach(function(reg) {
                 if (reg.active && reg.active.scriptURL && reg.active.scriptURL.indexOf('dev-sw') !== -1) {
                   reg.unregister();
+                } else {
+                  reg.update().catch(function() {});
                 }
               });
             }).catch(function() {});
-            navigator.serviceWorker.register('/sw.js').catch(function() {});
+            navigator.serviceWorker.register('/sw.js?v=4.0.0').catch(function() {});
           });
         }
       })();
@@ -87,7 +94,7 @@
       }
     </style>
     <meta name="theme-color" content="#065f46" />
-    <meta name="app-version" content="1.0.2" />
+    <meta name="app-version" content="4.0.0" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

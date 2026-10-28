@@ -701,6 +701,87 @@ export function detectAllInvolvedScheduleChanges(
   return [...personalNotifs, ...involvedNotifs];
 }
 
+const recentDispatchFingerprints = new Map<string, number>();
+
+/**
+ * Directly evaluates and dispatches OS + In-App notifications whenever shifts are swapped/edited
+ * (either locally in Dashboard/Settings or via Cloud Sync).
+ * Includes a 3.5-second deduplication window so rapid state updates never duplicate alerts.
+ */
+export function dispatchScheduleChangeNotifications(
+  oldSchedule: ShiftEntry[] | null | undefined,
+  newSchedule: ShiftEntry[] | null | undefined
+): ShiftNotificationItem[] {
+  if (!oldSchedule || !newSchedule || oldSchedule.length === 0 || newSchedule.length === 0) {
+    return [];
+  }
+  if (oldSchedule === newSchedule) return [];
+
+  const settings = loadUserAndroidSettings();
+  const detected = detectAllInvolvedScheduleChanges(oldSchedule, newSchedule, settings);
+  if (detected.length === 0) return [];
+
+  const nowMs = Date.now();
+  // Clean up expired deduplication entries
+  for (const [k, ts] of recentDispatchFingerprints.entries()) {
+    if (nowMs - ts > 3500) {
+      recentDispatchFingerprints.delete(k);
+    }
+  }
+
+  const freshItems = detected.filter((item) => {
+    const fp = `${item.shiftDate}_${item.shiftKind}_${item.type}_${item.message}`;
+    if (recentDispatchFingerprints.has(fp)) {
+      return false;
+    }
+    recentDispatchFingerprints.set(fp, nowMs);
+    return true;
+  });
+
+  if (freshItems.length === 0) return [];
+
+  // 1. Persist to notification history in localStorage
+  const currentHistory = loadNotificationHistory();
+  const updatedHistory = [...freshItems, ...currentHistory].slice(0, 60);
+  saveNotificationHistory(updatedHistory);
+
+  try {
+    localStorage.setItem(USER_LAST_SCHEDULE_SNAPSHOT_KEY, JSON.stringify(newSchedule));
+  } catch {}
+
+  // 2. Play sound & haptic vibration
+  playNotificationChime(settings.soundEnabled);
+  triggerAndroidHaptic([80, 50, 130], settings.hapticEnabled);
+
+  // 3. Fire OS / Native Android notifications (staggered by 80ms so Android never coalesces rapid notifications)
+  freshItems.slice(0, 4).forEach((item, idx) => {
+    if (idx === 0) {
+      sendNativeAndroidNotification(item.title, item.message, item.id);
+    } else {
+      setTimeout(() => {
+        sendNativeAndroidNotification(item.title, item.message, item.id);
+      }, idx * 80);
+    }
+  });
+
+  // 4. Broadcast custom DOM event so UserSettingsButton immediately updates its badge, history, and live floating banner
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('shiftflow-notifications-updated', {
+          detail: {
+            added: freshItems,
+            history: updatedHistory,
+            latest: freshItems[0],
+          },
+        })
+      );
+    } catch {}
+  }
+
+  return freshItems;
+}
+
 /**
  * Generates a rich Tomorrow / Today Shift Reminder notification for `selectedPerson`
  */

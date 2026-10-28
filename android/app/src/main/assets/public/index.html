@@ -61,17 +61,24 @@
           }
         }, true);
 
-        // Register clean PWA Service Worker and remove any Vite dev-sw module worker
+        // Purge any stale Workbox precaches and register clean PWA Service Worker
+        if ('caches' in window) {
+          caches.keys().then(function(keys) {
+            keys.forEach(function(k) { caches.delete(k); });
+          }).catch(function() {});
+        }
         if ('serviceWorker' in navigator) {
           window.addEventListener('load', function() {
             navigator.serviceWorker.getRegistrations().then(function(regs) {
               regs.forEach(function(reg) {
                 if (reg.active && reg.active.scriptURL && reg.active.scriptURL.indexOf('dev-sw') !== -1) {
                   reg.unregister();
+                } else {
+                  reg.update().catch(function() {});
                 }
               });
             }).catch(function() {});
-            navigator.serviceWorker.register('/sw.js').catch(function() {});
+            navigator.serviceWorker.register('/sw.js?v=4.0.0').catch(function() {});
           });
         }
       })();
@@ -87,7 +94,7 @@
       }
     </style>
     <meta name="theme-color" content="#065f46" />
-    <meta name="app-version" content="1.0.2" />
+    <meta name="app-version" content="4.0.0" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -227,11 +234,11 @@
         }
       }
     </style>
-  <script type="module" crossorigin src="/assets/index-CIO7mT_t.js"></script>
-  <link rel="modulepreload" crossorigin href="/assets/icons-CWPFcWw6.js">
-  <link rel="modulepreload" crossorigin href="/assets/recharts-vendor-18eniZZY.js">
+  <script type="module" crossorigin src="/assets/index-DvfoNm5k.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/icons-DKQ2puGq.js">
+  <link rel="modulepreload" crossorigin href="/assets/recharts-vendor-Clz5Woo5.js">
   <link rel="modulepreload" crossorigin href="/assets/xlsx-vendor-BBWTpfDg.js">
-  <link rel="modulepreload" crossorigin href="/assets/firebase-vendor-BWi4Xila.js">
+  <link rel="modulepreload" crossorigin href="/assets/firebase-vendor-okV4ld2U.js">
   <link rel="stylesheet" crossorigin href="/assets/index-CehtOLVh.css">
 <link rel="manifest" href="/manifest.webmanifest"></head>
   <body>

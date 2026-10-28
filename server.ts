@@ -341,8 +341,8 @@ async function startServer() {
     const clientSince = req.query.since as string | undefined;
     const nowMs = Date.now();
 
-    // If memory state is empty, check Firestore on-demand
-    if (db && !currentState) {
+    // Check Firestore on-demand if memory state is empty OR every 2 seconds to catch direct Android/Firestore writes
+    if (db && !isFirestoreQuotaExhausted && (!currentState || nowMs - lastFirestoreFetchTime > 2000)) {
       try {
         lastFirestoreFetchTime = nowMs;
         const snapshot = await getDoc(doc(db, 'roster_state', 'current'));
@@ -351,10 +351,17 @@ async function startServer() {
           isFirestoreConnected = true;
           const cloudUpdated = cloudData.updatedAt || '';
           const localUpdated = currentState?.updatedAt || '';
-          if (!currentState || (cloudUpdated && localUpdated ? cloudUpdated > localUpdated : Boolean(cloudUpdated))) {
+          const isDifferentTimestamp = cloudUpdated && cloudUpdated !== localUpdated;
+          if (!currentState || (isDifferentTimestamp && (!localUpdated || cloudUpdated > localUpdated))) {
             stateVersion++;
             currentState = { ...cloudData, _version: stateVersion };
             persistToDisk(currentState);
+            broadcast({
+              type: 'update',
+              data: currentState,
+              version: stateVersion,
+              updatedAt: cloudUpdated,
+            });
           }
         }
       } catch (e) {
