@@ -26,52 +26,412 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: 📥 دریافت سورس پروژه (Native Git Checkout - Node 24 Ready)
+      - name: 📥 دریافت سورس پروژه (Native Git Checkout)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          rm -rf .git
           git init .
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git fetch --depth=1 origin "${GITHUB_SHA}"
+          git fetch --depth=1 origin "${GITHUB_SHA}" || git fetch --depth=1 origin HEAD
           git checkout -f FETCH_HEAD
 
-      - name: ☕ نصب Java JDK 21 برای اندروید (setup-java v5)
+      - name: ☕ نصب Java JDK 21 (setup-java v5)
         uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: 📦 نصب وابستگی‌ها و بیلد کامل وب‌اپلیکیشن آفلاین
+      - name: 📦 نصب وابستگی‌ها و بیلد وب‌اپلیکیشن آفلاین
         run: |
+          NODE22_DIR=$(find /opt/hostedtoolcache/node -maxdepth 2 -type d -name "x64" 2>/dev/null | grep "/22\." | sort -V | tail -n 1 || true)
+          if [ -n "$NODE22_DIR" ] && [ -d "$NODE22_DIR/bin" ]; then
+            export PATH="$NODE22_DIR/bin:$PATH"
+          fi
           node -v
           npm -v
-          npm install --legacy-peer-deps
+          node -e '
+            const fs = require("fs");
+            async function fixPkg() {
+              if (!fs.existsSync("package.json")) return;
+              const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
+              delete p.engines;
+              for (const sec of ["dependencies", "devDependencies"]) {
+                if (!p[sec]) continue;
+                for (const k of Object.keys(p[sec])) {
+                  if (k.startsWith("@capacitor/")) { delete p[sec][k]; continue; }
+                  try {
+                    const r = await fetch("https://registry.npmjs.org/" + k);
+                    if (r.ok) {
+                      const d = await r.json();
+                      const want = String(p[sec][k]).replace(/^[\^~>=<]+/, "");
+                      if (d.versions && !d.versions[want] && d["dist-tags"] && d["dist-tags"].latest) {
+                        console.log("Adjusting", k, p[sec][k], "->", "^" + d["dist-tags"].latest);
+                        p[sec][k] = "^" + d["dist-tags"].latest;
+                      }
+                    }
+                  } catch (e) {}
+                }
+              }
+              fs.writeFileSync("package.json", JSON.stringify(p, null, 2));
+            }
+            fixPkg();
+          '
+          rm -f package-lock.json bun.lock bun.lockb
+          npm install --legacy-peer-deps --no-audit --no-fund || npm install --force --no-audit --no-fund
           npm run build
 
-      - name: 📱 تزریق دارایی‌های آفلاین به موتور بومی اندروید (Assets Sync)
-        run: |
-          mkdir -p android/app/src/main/assets/public
-          rm -rf android/app/src/main/assets/public/*
-          cp -r dist/* android/app/src/main/assets/public/
-          rm -f android/app/src/main/assets/public/ShiftFlow-FMD.apk
-          rm -f android/app/src/main/assets/public/ShiftFlow-FMD-Android-Package.zip
-          rm -f android/app/src/main/assets/public/github-android-release.yml
-
-      - name: 🔨 کامپایل و امضای دیجیتال فایل نصبی مستقل اندروید (ShiftFlow-FMD-Standalone.apk)
+      - name: 🔨 کامپایل مستقیم و امضای دیجیتال فایل نصبی مستقل اندروید (ShiftFlow-FMD.apk)
         run: |
           set -e
-          if [ -d "android" ] && [ -f "android/gradlew" ]; then
-            cd android
-            chmod +x gradlew
-            if ./gradlew assembleDebug --no-daemon; then
-              cp app/build/outputs/apk/debug/app-debug.apk ../ShiftFlow-FMD-Standalone.apk
-            fi
-            cd ..
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          BUILD_TOOLS=$(ls -d "$SDK_ROOT/build-tools/"* | sort -V | tail -n 1)
+          PLATFORM_JAR=$(ls "$SDK_ROOT/platforms/"*/android.jar | sort -V | tail -n 1)
+          echo "Using BUILD_TOOLS: $BUILD_TOOLS"
+          echo "Using PLATFORM_JAR: $PLATFORM_JAR"
+
+          WORK="/tmp/shiftflow_apk_build"
+          rm -rf "$WORK"
+          mkdir -p "$WORK/src/ir/fmd/shiftflow/app"
+          mkdir -p "$WORK/res/values" "$WORK/res/layout" "$WORK/res/drawable"
+          mkdir -p "$WORK/assets/public" "$WORK/obj" "$WORK/dex"
+
+          if [ -d "dist" ] && [ -f "dist/index.html" ]; then
+            cp -r dist/* "$WORK/assets/public/"
+          elif [ -d "android/app/src/main/assets/public" ]; then
+            cp -r android/app/src/main/assets/public/* "$WORK/assets/public/"
+          else
+            cp index.html "$WORK/assets/public/"
           fi
-          if [ ! -f "ShiftFlow-FMD-Standalone.apk" ]; then
-            cp public/ShiftFlow-FMD.apk ShiftFlow-FMD-Standalone.apk
+          rm -f "$WORK/assets/public/"*.apk "$WORK/assets/public/"*.zip "$WORK/assets/public/"*.yml
+
+          if [ -f "public/pwa-192x192.png" ]; then
+            cp public/pwa-192x192.png "$WORK/res/drawable/ic_launcher.png"
+          else
+            python3 -c '
+          import struct, zlib
+          def png(w, h, r, g, b):
+              raw = b"".join(b"\x00" + bytes([r, g, b, 255]) * w for _ in range(h))
+              def ch(t, d): return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+              return b"\x89PNG\r\n\x1a\n" + ch(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)) + ch(b"IDAT", zlib.compress(raw, 9)) + ch(b"IEND", b"")
+          open("/tmp/shiftflow_apk_build/res/drawable/ic_launcher.png", "wb").write(png(192, 192, 6, 95, 70))
+          '
           fi
-          ls -lh ShiftFlow-FMD-Standalone.apk public/ShiftFlow-FMD.apk
+
+          cat << 'EOF' > "$WORK/AndroidManifest.xml"
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="ir.fmd.shiftflow.app"
+              android:versionCode="3"
+              android:versionName="3.0.0">
+              <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.VIBRATE" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <application
+                  android:allowBackup="true"
+                  android:icon="@drawable/ic_launcher"
+                  android:label="@string/app_name"
+                  android:supportsRtl="true"
+                  android:usesCleartextTraffic="true"
+                  android:hardwareAccelerated="true"
+                  android:theme="@style/AppTheme">
+                  <activity
+                      android:name=".MainActivity"
+                      android:label="@string/app_name"
+                      android:theme="@style/AppTheme"
+                      android:launchMode="singleTask"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat << 'EOF' > "$WORK/res/values/strings.xml"
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">ShiftFlow FMD</string>
+          </resources>
+          EOF
+
+          cat << 'EOF' > "$WORK/res/values/styles.xml"
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+                  <item name="android:statusBarColor">#065f46</item>
+                  <item name="android:navigationBarColor">#0f172a</item>
+                  <item name="android:windowNoTitle">true</item>
+                  <item name="android:windowActionBar">false</item>
+              </style>
+          </resources>
+          EOF
+
+          cat << 'EOF' > "$WORK/res/layout/activity_main.xml"
+          <?xml version="1.0" encoding="utf-8"?>
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent" />
+          EOF
+
+          if [ -f "android/app/src/main/java/ir/fmd/shiftflow/app/MainActivity.java" ]; then
+            cp "android/app/src/main/java/ir/fmd/shiftflow/app/MainActivity.java" "$WORK/src/ir/fmd/shiftflow/app/MainActivity.java"
+          else
+            cat << 'EOF' > "$WORK/src/ir/fmd/shiftflow/app/MainActivity.java"
+          package ir.fmd.shiftflow.app;
+          import android.app.Activity;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.graphics.Color;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.os.Environment;
+          import android.print.PrintAttributes;
+          import android.print.PrintDocumentAdapter;
+          import android.print.PrintManager;
+          import android.util.Base64;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.view.Window;
+          import android.view.WindowManager;
+          import android.webkit.CookieManager;
+          import android.webkit.JavascriptInterface;
+          import android.webkit.ValueCallback;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebResourceResponse;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.FrameLayout;
+          import android.widget.Toast;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.IOException;
+          import java.io.InputStream;
+          import java.util.HashMap;
+          import java.util.Map;
+
+          public class MainActivity extends Activity {
+              static final int FILE_CHOOSER_RESULT_CODE = 1001;
+              static final String LOCAL_ORIGIN = "https://localhost";
+              WebView webView;
+              ValueCallback<Uri[]> filePathCallback;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  requestWindowFeature(Window.FEATURE_NO_TITLE);
+                  Window window = getWindow();
+                  if (window != null) {
+                      window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+                      window.setStatusBarColor(Color.parseColor("#065f46"));
+                      window.setNavigationBarColor(Color.parseColor("#0f172a"));
+                  }
+                  FrameLayout root = new FrameLayout(this);
+                  webView = new WebView(this);
+                  root.addView(webView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                  setContentView(root);
+                  WebSettings s = webView.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setDatabaseEnabled(true);
+                  s.setAllowFileAccess(true);
+                  s.setAllowContentAccess(true);
+                  s.setAllowFileAccessFromFileURLs(true);
+                  s.setAllowUniversalAccessFromFileURLs(true);
+                  s.setLoadWithOverviewMode(true);
+                  s.setUseWideViewPort(true);
+                  s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+                  s.setTextZoom(100);
+                  CookieManager.getInstance().setAcceptCookie(true);
+                  CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+                  webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                  webView.addJavascriptInterface(new AndroidBridge(this), "AndroidBridge");
+                  webView.setWebViewClient(new AssetWebViewClient(this));
+                  webView.setWebChromeClient(new AppWebChromeClient(this));
+                  webView.loadUrl(LOCAL_ORIGIN + "/index.html");
+              }
+
+              static class AssetWebViewClient extends WebViewClient {
+                  final MainActivity activity;
+                  AssetWebViewClient(MainActivity a) { this.activity = a; }
+                  @Override
+                  public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                      Uri uri = request.getUrl();
+                      if (uri != null && "localhost".equalsIgnoreCase(uri.getHost())) {
+                          String path = uri.getPath();
+                          if (path == null || path.isEmpty() || "/".equals(path)) path = "/index.html";
+                          return activity.loadAssetResource(path);
+                      }
+                      return super.shouldInterceptRequest(view, request);
+                  }
+              }
+
+              static class AppWebChromeClient extends WebChromeClient {
+                  final MainActivity activity;
+                  AppWebChromeClient(MainActivity a) { this.activity = a; }
+                  @Override
+                  public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> cb, FileChooserParams p) {
+                      if (activity.filePathCallback != null) activity.filePathCallback.onReceiveValue(null);
+                      activity.filePathCallback = cb;
+                      Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+                      i.addCategory(Intent.CATEGORY_OPENABLE);
+                      i.setType("*/*");
+                      activity.startActivityForResult(Intent.createChooser(i, "انتخاب فایل"), FILE_CHOOSER_RESULT_CODE);
+                      return true;
+                  }
+              }
+
+              WebResourceResponse loadAssetResource(String rawPath) {
+                  String clean = rawPath.startsWith("/") ? rawPath.substring(1) : rawPath;
+                  if (clean.isEmpty()) clean = "index.html";
+                  try {
+                      InputStream is = getAssets().open("public/" + clean);
+                      WebResourceResponse res = new WebResourceResponse(guessMime(clean), "UTF-8", is);
+                      Map<String, String> h = new HashMap<>();
+                      h.put("Access-Control-Allow-Origin", "*");
+                      res.setResponseHeaders(h);
+                      return res;
+                  } catch (IOException e) {
+                      if (!clean.contains(".")) {
+                          try {
+                              return new WebResourceResponse("text/html", "UTF-8", getAssets().open("public/index.html"));
+                          } catch (IOException ignored) {}
+                      }
+                      return null;
+                  }
+              }
+
+              String guessMime(String p) {
+                  String l = p.toLowerCase();
+                  if (l.endsWith(".html")) return "text/html";
+                  if (l.endsWith(".js") || l.endsWith(".mjs")) return "application/javascript";
+                  if (l.endsWith(".css")) return "text/css";
+                  if (l.endsWith(".json") || l.endsWith(".webmanifest")) return "application/json";
+                  if (l.endsWith(".svg")) return "image/svg+xml";
+                  if (l.endsWith(".png")) return "image/png";
+                  if (l.endsWith(".pdf")) return "application/pdf";
+                  if (l.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                  return "application/octet-stream";
+              }
+
+              @Override
+              protected void onActivityResult(int req, int res, Intent data) {
+                  if (req == FILE_CHOOSER_RESULT_CODE && filePathCallback != null) {
+                      Uri[] r = (res == Activity.RESULT_OK && data != null && data.getDataString() != null)
+                              ? new Uri[]{Uri.parse(data.getDataString())} : null;
+                      filePathCallback.onReceiveValue(r);
+                      filePathCallback = null;
+                  }
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (webView != null && webView.canGoBack()) webView.goBack();
+                  else super.onBackPressed();
+              }
+
+              public static class AndroidBridge {
+                  final MainActivity activity;
+                  public AndroidBridge(MainActivity a) { this.activity = a; }
+                  @JavascriptInterface public String getAppVersion() { return "3.0.0"; }
+                  @JavascriptInterface public boolean isNativeAndroid() { return true; }
+                  @JavascriptInterface public void printPage(String jobTitle) {
+                      activity.runOnUiThread(new PrintTask(activity, jobTitle));
+                  }
+                  @JavascriptInterface public void saveBase64File(String b64, String name, String mime) {
+                      activity.runOnUiThread(new SaveTask(activity, b64, name));
+                  }
+              }
+
+              static class PrintTask implements Runnable {
+                  final MainActivity a; final String t;
+                  PrintTask(MainActivity a, String t) { this.a = a; this.t = t; }
+                  @Override public void run() {
+                      try {
+                          PrintManager pm = (PrintManager) a.getSystemService(Context.PRINT_SERVICE);
+                          if (pm != null && a.webView != null) {
+                              String j = (t != null && !t.isEmpty()) ? t : "ShiftFlow-FMD";
+                              PrintDocumentAdapter pda = a.webView.createPrintDocumentAdapter(j);
+                              pm.print(j, pda, new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4).build());
+                          }
+                      } catch (Exception ignored) {}
+                  }
+              }
+
+              static class SaveTask implements Runnable {
+                  final Context c; final String b; final String n;
+                  SaveTask(Context c, String b, String n) { this.c = c; this.b = b; this.n = n; }
+                  @Override public void run() {
+                      try {
+                          byte[] bytes = Base64.decode(b, Base64.DEFAULT);
+                          File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                          if (!dir.exists()) dir.mkdirs();
+                          File out = new File(dir, (n != null && !n.isEmpty()) ? n : "ShiftFlow.xlsx");
+                          FileOutputStream fos = new FileOutputStream(out);
+                          fos.write(bytes); fos.close();
+                          Toast.makeText(c, "ذخیره شد: " + out.getName(), Toast.LENGTH_LONG).show();
+                      } catch (Exception ignored) {}
+                  }
+              }
+          }
+          EOF
+          fi
+
+          "$BUILD_TOOLS/aapt2" compile --dir "$WORK/res" -o "$WORK/res.zip"
+          "$BUILD_TOOLS/aapt2" link \
+            -I "$PLATFORM_JAR" \
+            --manifest "$WORK/AndroidManifest.xml" \
+            --java "$WORK/src" \
+            -o "$WORK/unaligned.apk" \
+            "$WORK/res.zip"
+
+          javac --release 8 \
+            -classpath "$PLATFORM_JAR:$WORK/src" \
+            -d "$WORK/obj" \
+            "$WORK/src/ir/fmd/shiftflow/app/R.java" \
+            "$WORK/src/ir/fmd/shiftflow/app/MainActivity.java"
+
+          CLASS_FILES=$(find "$WORK/obj" -name "*.class")
+          "$BUILD_TOOLS/d8" --lib "$PLATFORM_JAR" --min-api 24 --output "$WORK/dex" $CLASS_FILES
+
+          cp "$WORK/dex/classes.dex" "$WORK/classes.dex"
+          (cd "$WORK" && jar uf unaligned.apk classes.dex assets)
+
+          "$BUILD_TOOLS/zipalign" -f -p 4 "$WORK/unaligned.apk" "$WORK/aligned.apk"
+
+          keytool -genkeypair -v \
+            -keystore "$WORK/signing.keystore" \
+            -storepass shiftflow1405 \
+            -keypass shiftflow1405 \
+            -alias shiftflow \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=ShiftFlow FMD, OU=Bioprocess, O=FMD, L=Tehran, ST=Tehran, C=IR"
+
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$WORK/signing.keystore" \
+            --ks-pass pass:shiftflow1405 \
+            --key-pass pass:shiftflow1405 \
+            --ks-key-alias shiftflow \
+            --out "ShiftFlow-FMD.apk" \
+            "$WORK/aligned.apk"
+
+          cp "ShiftFlow-FMD.apk" "ShiftFlow-FMD-Standalone.apk"
+          if [ -f "public/ShiftFlow-FMD-Android-Package.zip" ]; then
+            cp "public/ShiftFlow-FMD-Android-Package.zip" "ShiftFlow-FMD-Android-Package.zip"
+          else
+            cp "$WORK/signing.keystore" "signing.keystore"
+            jar cMf "ShiftFlow-FMD-Android-Package.zip" "ShiftFlow-FMD.apk" "signing.keystore"
+          fi
+          ls -lh ShiftFlow-FMD.apk ShiftFlow-FMD-Standalone.apk ShiftFlow-FMD-Android-Package.zip
 
       - name: 🚀 انتشار خودکار در بخش Releases گیت‌هاب (GitHub CLI)
         env:
@@ -82,9 +442,9 @@ jobs:
           ## 📱 نسخه رسمی و مستقل اندروید سامانه مدیریت شیفت تولید (ShiftFlow FMD v3.0.0)
 
           ### فایل‌های قابل دانلود در این انتشار:
-          - **`ShiftFlow-FMD.apk`**: نسخه کامل، مستقل و آفلاین (Standalone Native APK - 1.7 MB) با امضای دیجیتال v2/v3
+          - **`ShiftFlow-FMD.apk`**: نسخه کامل، مستقل و آفلاین (Standalone Native APK) با امضای دیجیتال v2/v3
           - **`ShiftFlow-FMD-Standalone.apk`**: خروجی بیلد مستقیم GitHub Actions
-          - **`ShiftFlow-FMD-Android-Package.zip`**: پکیج کامل شامل `.apk`، باندل `.aab` گوگل پلی و کلید امضای دیجیتال (`signing.keystore`)
+          - **`ShiftFlow-FMD-Android-Package.zip`**: پکیج کامل شامل `.apk` و کلید امضای دیجیتال (`signing.keystore`)
 
           ### ویژگی‌ها:
           - اجرای ۱۰۰٪ مستقل و بدون نیاز به اینترنت یا سرور خارجی
@@ -95,18 +455,18 @@ jobs:
 
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
             gh release upload "${RELEASE_TAG}" \
-              public/ShiftFlow-FMD.apk \
+              ShiftFlow-FMD.apk \
               ShiftFlow-FMD-Standalone.apk \
-              public/ShiftFlow-FMD-Android-Package.zip \
+              ShiftFlow-FMD-Android-Package.zip \
               --clobber
             gh release edit "${RELEASE_TAG}" \
               --title "ShiftFlow FMD Android ${RELEASE_TAG}" \
               --notes-file release_notes.md
           else
             gh release create "${RELEASE_TAG}" \
-              public/ShiftFlow-FMD.apk \
+              ShiftFlow-FMD.apk \
               ShiftFlow-FMD-Standalone.apk \
-              public/ShiftFlow-FMD-Android-Package.zip \
+              ShiftFlow-FMD-Android-Package.zip \
               --title "ShiftFlow FMD Android ${RELEASE_TAG}" \
               --notes-file release_notes.md
           fi

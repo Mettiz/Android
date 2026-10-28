@@ -261,82 +261,27 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
     }
   };
 
-  const githubWorkflowYaml = `name: Build Android APK & Publish GitHub Release
+  const [githubWorkflowYaml, setGithubWorkflowYaml] = useState<string>('');
 
-on:
-  push:
-    branches: [ main, master ]
-    tags: [ 'v*' ]
-  workflow_dispatch:
-    inputs:
-      release_tag:
-        description: 'نسخه انتشار (مثلاً v3.0.0)'
-        required: false
-        default: 'v3.0.0'
+  useEffect(() => {
+    fetch('/github-android-release.yml')
+      .then((r) => (r.ok ? r.text() : ''))
+      .then((txt) => {
+        if (txt) setGithubWorkflowYaml(txt);
+      })
+      .catch(() => {});
+  }, []);
 
-permissions:
-  contents: write
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
-jobs:
-  build-android:
-    name: Build ShiftFlow FMD Android APK
-    runs-on: ubuntu-24.04
-    steps:
-      - name: 📥 دریافت سورس پروژه (Native Git Checkout - Node 24 Ready)
-        env:
-          GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git init .
-          git remote add origin "https://x-access-token:\${GH_TOKEN}@github.com/\${GITHUB_REPOSITORY}.git"
-          git fetch --depth=1 origin "\${GITHUB_SHA}"
-          git checkout -f FETCH_HEAD
-      - name: ☕ نصب Java JDK 21 برای اندروید (setup-java v5)
-        uses: actions/setup-java@v5
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-      - name: 📦 نصب وابستگی‌ها و بیلد کامل وب‌اپلیکیشن آفلاین
-        run: |
-          npm install --legacy-peer-deps
-          npm run build
-      - name: 📱 تزریق دارایی‌های آفلاین به موتور بومی اندروید (Assets Sync)
-        run: |
-          mkdir -p android/app/src/main/assets/public
-          rm -rf android/app/src/main/assets/public/*
-          cp -r dist/* android/app/src/main/assets/public/
-          rm -f android/app/src/main/assets/public/ShiftFlow-FMD.apk
-          rm -f android/app/src/main/assets/public/ShiftFlow-FMD-Android-Package.zip
-          rm -f android/app/src/main/assets/public/github-android-release.yml
-      - name: 🔨 کامپایل فایل نصبی مستقل اندروید (ShiftFlow-FMD-Standalone.apk)
-        run: |
-          set -e
-          if [ -d "android" ] && [ -f "android/gradlew" ]; then
-            cd android && chmod +x gradlew
-            if ./gradlew assembleDebug --no-daemon; then
-              cp app/build/outputs/apk/debug/app-debug.apk ../ShiftFlow-FMD-Standalone.apk
-            fi
-            cd ..
-          fi
-          if [ ! -f "ShiftFlow-FMD-Standalone.apk" ]; then
-            cp public/ShiftFlow-FMD.apk ShiftFlow-FMD-Standalone.apk
-          fi
-      - name: 🚀 انتشار خودکار در بخش Releases گیت‌هاب (GitHub CLI)
-        env:
-          GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: \${{ github.event.inputs.release_tag || 'v3.0.0' }}
-        run: |
-          if gh release view "\${RELEASE_TAG}" >/dev/null 2>&1; then
-            gh release upload "\${RELEASE_TAG}" public/ShiftFlow-FMD.apk ShiftFlow-FMD-Standalone.apk public/ShiftFlow-FMD-Android-Package.zip --clobber
-          else
-            gh release create "\${RELEASE_TAG}" public/ShiftFlow-FMD.apk ShiftFlow-FMD-Standalone.apk public/ShiftFlow-FMD-Android-Package.zip --title "ShiftFlow FMD Android \${RELEASE_TAG}" --notes "نسخه مستقل و آفلاین اندروید ShiftFlow FMD"
-          fi`;
-
-  const handleDownloadGithubWorkflow = () => {
+  const handleDownloadGithubWorkflow = async () => {
     triggerHaptic(30);
-    const blob = new Blob([githubWorkflowYaml], { type: 'text/yaml;charset=utf-8' });
+    let content = githubWorkflowYaml;
+    if (!content) {
+      try {
+        const res = await fetch('/github-android-release.yml');
+        if (res.ok) content = await res.text();
+      } catch {}
+    }
+    const blob = new Blob([content], { type: 'text/yaml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
