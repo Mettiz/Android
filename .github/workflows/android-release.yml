@@ -167,8 +167,8 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               package="ir.fmd.shiftflow.app"
-              android:versionCode="4"
-              android:versionName="4.0.0">
+              android:versionCode="5"
+              android:versionName="4.1.0">
               <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -314,7 +314,7 @@ jobs:
                   webView.addJavascriptInterface(new AndroidBridge(this), "AndroidBridge");
                   webView.setWebViewClient(new AssetWebViewClient(this));
                   webView.setWebChromeClient(new AppWebChromeClient(this));
-                  webView.loadUrl(LOCAL_ORIGIN + "/index.html?v=4.0.0");
+                  webView.loadUrl(LOCAL_ORIGIN + "/index.html?v=4.1.0");
               }
 
               void purgeStaleServiceWorkerAndCache() {
@@ -382,6 +382,35 @@ jobs:
                   }
               }
 
+              static final String VERCEL_SYNC_BASE = "https://android-fmd-shift-flow.vercel.app";
+
+              WebResourceResponse proxyVercelSyncGet(Uri uri) {
+                  try {
+                      String path = uri.getPath() != null ? uri.getPath() : "/api/sync";
+                      String query = uri.getEncodedQuery();
+                      String fullUrl = VERCEL_SYNC_BASE + path + (query != null && !query.isEmpty() ? "?" + query : "");
+                      java.net.URL url = new java.net.URL(fullUrl);
+                      java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                      conn.setRequestMethod("GET");
+                      conn.setConnectTimeout(6000);
+                      conn.setReadTimeout(6000);
+                      conn.setUseCaches(false);
+                      conn.setRequestProperty("Accept", "application/json");
+                      conn.setRequestProperty("Cache-Control", "no-store, no-cache");
+                      int code = conn.getResponseCode();
+                      InputStream stream = (code >= 200 && code < 400) ? conn.getInputStream() : conn.getErrorStream();
+                      if (stream != null) {
+                          WebResourceResponse res = new WebResourceResponse("application/json", "UTF-8", stream);
+                          Map<String, String> h = new HashMap<>();
+                          h.put("Access-Control-Allow-Origin", "*");
+                          h.put("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+                          res.setResponseHeaders(h);
+                          return res;
+                      }
+                  } catch (Exception ignored) {}
+                  return null;
+              }
+
               static class AssetWebViewClient extends WebViewClient {
                   final MainActivity activity;
                   AssetWebViewClient(MainActivity a) { this.activity = a; }
@@ -390,6 +419,13 @@ jobs:
                       Uri uri = request.getUrl();
                       if (uri != null && "localhost".equalsIgnoreCase(uri.getHost())) {
                           String path = uri.getPath();
+                          if (path != null && path.startsWith("/api/")) {
+                              if ("GET".equalsIgnoreCase(request.getMethod()) && !path.contains("/stream")) {
+                                  WebResourceResponse proxied = activity.proxyVercelSyncGet(uri);
+                                  if (proxied != null) return proxied;
+                              }
+                              return null;
+                          }
                           if (path == null || path.isEmpty() || "/".equals(path)) path = "/index.html";
                           return activity.loadAssetResource(path);
                       }
@@ -465,7 +501,7 @@ jobs:
               public static class AndroidBridge {
                   final MainActivity activity;
                   public AndroidBridge(MainActivity a) { this.activity = a; }
-                  @JavascriptInterface public String getAppVersion() { return "4.0.0"; }
+                  @JavascriptInterface public String getAppVersion() { return "4.1.0"; }
                   @JavascriptInterface public boolean isNativeAndroid() { return true; }
                   @JavascriptInterface public void requestNotificationPermission() {
                       activity.runOnUiThread(new Runnable() {
@@ -640,38 +676,35 @@ jobs:
             "$WORK/aligned.apk"
 
           cp "ShiftFlow-FMD.apk" "ShiftFlow-FMD-Standalone.apk"
-          if [ -f "public/ShiftFlow-FMD-Android-Package.zip" ]; then
-            cp "public/ShiftFlow-FMD-Android-Package.zip" "ShiftFlow-FMD-Android-Package.zip"
-          else
-            cp "$WORK/signing.keystore" "signing.keystore"
-            jar cMf "ShiftFlow-FMD-Android-Package.zip" "ShiftFlow-FMD.apk" "signing.keystore"
-          fi
+          cp "$WORK/signing.keystore" "signing.keystore"
+          jar cMf "ShiftFlow-FMD-Android-Package.zip" "ShiftFlow-FMD.apk" "signing.keystore"
           ls -lh ShiftFlow-FMD.apk ShiftFlow-FMD-Standalone.apk ShiftFlow-FMD-Android-Package.zip
 
       - name: 🚀 انتشار خودکار در بخش Releases گیت‌هاب (GitHub CLI)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.event.inputs.release_tag || 'v4.0.0' }}
+          RELEASE_TAG: ${{ github.event.inputs.release_tag || 'v4.1.0' }}
         run: |
           cat << 'EOF' > release_notes.md
-          ## 📱 نسخه رسمی و مستقل اندروید سامانه مدیریت شیفت تولید (ShiftFlow FMD v4.0.0)
+          ## 📱 نسخه رسمی و مستقل اندروید سامانه مدیریت شیفت تولید (ShiftFlow FMD v4.1.0 — ضد فیلتر با سرور Vercel)
 
           ### فایل‌های قابل دانلود در این انتشار:
-          - **`ShiftFlow-FMD.apk`**: نسخه کامل، مستقل و آفلاین (Standalone Native APK v4.0.0) با امضای دیجیتال v2/v3
+          - **`ShiftFlow-FMD.apk`**: نسخه کامل، مستقل و بدون نیاز به فیلترشکن (Standalone Native APK v4.1.0)
           - **`ShiftFlow-FMD-Standalone.apk`**: خروجی بیلد مستقیم GitHub Actions
           - **`ShiftFlow-FMD-Android-Package.zip`**: پکیج کامل شامل `.apk` و کلید امضای دیجیتال (`signing.keystore`)
 
-          ### ویژگی‌های نسخه ۴.۰.۰:
-          - **ارسال فوری نوتیفیکیشن اصلی گوشی (OS Notification) برای تمام افراد درگیر در جابجایی شیفت**: به محض جابجایی، افزودن یا حذف هر نفر در شیفت، اعلان سیستم‌عامل اندروید و مرورگر بدون نیاز به زدن دکمه بروزرسانی برای افراد درگیر و کاربر انتخاب‌شده ارسال می‌شود.
-          - **همگام‌سازی آنی دوطرفه (Real-Time Firestore + Server Sync)**: ارتباط مستقیم و بلادرنگ بین اپلیکیشن اندروید و نسخه وب بدون تداخل کش قدیمی.
-          - **پاک‌سازی خودکار کش قدیمی (Anti-Stale Cache v4.0.0)**: حذف خودکار کش‌های نسخه ۳ در WebView تا همیشه آخرین نسخه برنامه و تغییرات شیفت نمایش داده شود.
-          - **سرویس فعال پس‌زمینه (Background WakeLock & Polling)**: دریافت آنی تغییرات شیفت حتی زمانی که برنامه در پس‌زمینه گوشی است.
+          ### ویژگی‌های نسخه ۴.۱.۰:
+          - **اتصال مستقیم به سرور Vercel (`https://android-fmd-shift-flow.vercel.app`) بدون نیاز به فیلترشکن در ایران**: تمام تغییرات شیفت توسط مدیر و دریافت آنی نوتیفیکیشن‌ها برای افراد درگیر، بدون نیاز به روشن بودن VPN انجام می‌شود.
+          - **ارسال فوری نوتیفیکیشن اصلی گوشی (OS Notification) برای تمام افراد درگیر در جابجایی شیفت**: به محض جابجایی، افزودن یا حذف هر نفر در شیفت، اعلان سیستم‌عامل اندروید و مرورگر بدون نیاز به زدن دکمه بروزرسانی ارسال می‌شود.
+          - **پروکسی داخلی اندروید و سرویس پس‌زمینه**: پشتیبانی همزمان در WebView و Service Worker برای پایداری ۱۰۰٪ در شبکه‌های ایران.
           EOF
 
-          # حذف ریلیز قدیمی v3.0.0 در صورت وجود تا v4.0.0 به عنوان آخرین نسخه (Latest Release) قرار گیرد
-          if [ "${RELEASE_TAG}" != "v3.0.0" ]; then
-            gh release delete "v3.0.0" --yes --cleanup-tag --repo "${GITHUB_REPOSITORY}" 2>/dev/null || true
-          fi
+          # حذف ریلیزهای قدیمی v3.0.0 و v4.0.0 در صورت وجود تا v4.1.0 به عنوان آخرین نسخه (Latest Release) قرار گیرد
+          for old_tag in "v3.0.0" "v4.0.0"; do
+            if [ "${RELEASE_TAG}" != "${old_tag}" ]; then
+              gh release delete "${old_tag}" --yes --cleanup-tag --repo "${GITHUB_REPOSITORY}" 2>/dev/null || true
+            fi
+          done
 
           if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release upload "${RELEASE_TAG}" \

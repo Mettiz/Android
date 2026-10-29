@@ -1,1 +1,72 @@
-{"name":"ShiftFlow - مدیریت شیفت و فرآیند تولید FMD","short_name":"ShiftFlow","description":"اپلیکیشن مدیریت هوشمند برنامه شیفت تولید، تقویم فرآیندهای بیوپروسس و تحلیل عدالت کاری","start_url":"/","display":"standalone","background_color":"#f8fafc","theme_color":"#065f46","lang":"fa","scope":"/","id":"/","orientation":"portrait","dir":"rtl","categories":["productivity","business","utilities"],"icons":[{"src":"/pwa-192x192.png","sizes":"192x192","type":"image/png","purpose":"any"},{"src":"/pwa-512x512.png","sizes":"512x512","type":"image/png","purpose":"any"},{"src":"/pwa-maskable-512x512.png","sizes":"512x512","type":"image/png","purpose":"maskable"}]}
+{
+  "id": "/",
+  "name": "ShiftFlow - مدیریت شیفت و فرآیند تولید FMD",
+  "short_name": "ShiftFlow",
+  "description": "اپلیکیشن مدیریت هوشمند برنامه شیفت تولید، تقویم فرآیندهای بیوپروسس و تحلیل عدالت کاری (با پشتیبانی کامل آفلاین)",
+  "theme_color": "#065f46",
+  "background_color": "#f8fafc",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait",
+  "dir": "rtl",
+  "lang": "fa",
+  "start_url": "/",
+  "scope": "/",
+  "prefer_related_applications": false,
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "categories": ["productivity", "business", "utilities"],
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/pwa-screenshot-mobile.png",
+      "sizes": "540x960",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "داشبورد مدیریت شیفت و فرآیند تولید ShiftFlow در اندروید"
+    },
+    {
+      "src": "/pwa-screenshot-wide.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "نمای کامل جدول ماهانه و تحلیل عدالت شیفت‌ها"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "شیفت امروز و تقویم ماهانه",
+      "short_name": "شیفت امروز",
+      "description": "مشاهده فوری شیفت روز، شب و آنکال امروز",
+      "url": "/?view=today",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "گزارش کارکرد و تحلیل عدالت",
+      "short_name": "تحلیل عدالت",
+      "description": "بررسی ساعات کاری موزون و توازن شیفت پرسنل",
+      "url": "/?view=fairness",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}

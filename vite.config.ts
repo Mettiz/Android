@@ -1,8 +1,7 @@
-// Vite Build Configuration - Final ShiftFlow v1.0.2 (Android PWA Ready)
+// Vite Build Configuration - Final ShiftFlow v4.1.0 (Android & Vercel Ready)
 import path from 'path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
   server: {
@@ -13,86 +12,6 @@ export default defineConfig({
   },
   plugins: [
     react(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      injectRegister: false,
-      includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png', 'sw-notif-handler.js'],
-      manifest: {
-        id: '/',
-        name: 'ShiftFlow - مدیریت شیفت و فرآیند تولید FMD',
-        short_name: 'ShiftFlow',
-        description: 'اپلیکیشن مدیریت هوشمند برنامه شیفت تولید، تقویم فرآیندهای بیوپروسس و تحلیل عدالت کاری',
-        theme_color: '#065f46',
-        background_color: '#f8fafc',
-        display: 'standalone',
-        orientation: 'portrait',
-        dir: 'rtl',
-        lang: 'fa',
-        start_url: '/',
-        scope: '/',
-        categories: ['productivity', 'business', 'utilities'],
-        icons: [
-          {
-            src: '/pwa-192x192.png',
-            sizes: '192x192',
-            type: 'image/png',
-            purpose: 'any',
-          },
-          {
-            src: '/pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'any',
-          },
-          {
-            src: '/pwa-maskable-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'maskable',
-          },
-        ],
-      },
-      workbox: {
-        importScripts: ['/sw-notif-handler.js'],
-        globPatterns: [],
-        skipWaiting: true,
-        clientsClaim: true,
-        cleanupOutdatedCaches: true,
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts-cache',
-              expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 365,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'gstatic-fonts-cache',
-              expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 365,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-        ],
-      },
-      devOptions: {
-        enabled: false,
-      },
-    }),
   ],
   resolve: {
     alias: {

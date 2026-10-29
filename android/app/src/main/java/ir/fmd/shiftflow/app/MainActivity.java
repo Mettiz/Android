@@ -192,6 +192,32 @@ public class MainActivity extends Activity {
         webView.setDownloadListener(new AppDownloadListener(this));
     }
 
+    static final String VERCEL_SYNC_BASE = "https://android-fmd-shift-flow.vercel.app";
+
+    WebResourceResponse proxyVercelSyncGet(Uri uri) {
+        try {
+            String path = uri.getPath() != null ? uri.getPath() : "/api/sync";
+            String query = uri.getEncodedQuery();
+            String fullUrl = VERCEL_SYNC_BASE + path + (query != null && !query.isEmpty() ? "?" + query : "");
+            java.net.URL url = new java.net.URL(fullUrl);
+            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(6000);
+            conn.setReadTimeout(6000);
+            conn.setUseCaches(false);
+            conn.setRequestProperty("Accept", "application/json");
+            conn.setRequestProperty("Cache-Control", "no-store, no-cache");
+
+            int code = conn.getResponseCode();
+            InputStream stream = (code >= 200 && code < 400) ? conn.getInputStream() : conn.getErrorStream();
+            if (stream != null) {
+                return buildCorsResponse("application/json", stream);
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
     static class AssetWebViewClient extends WebViewClient {
         final MainActivity activity;
 
@@ -209,6 +235,15 @@ public class MainActivity extends Activity {
             if (host != null && host.equalsIgnoreCase("localhost")
                     && ("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme))) {
                 String path = uri.getPath();
+                if (path != null && path.startsWith("/api/")) {
+                    if ("GET".equalsIgnoreCase(request.getMethod()) && !path.contains("/stream")) {
+                        WebResourceResponse proxied = activity.proxyVercelSyncGet(uri);
+                        if (proxied != null) {
+                            return proxied;
+                        }
+                    }
+                    return null;
+                }
                 if (path == null || path.isEmpty() || "/".equals(path)) {
                     path = "/index.html";
                 }
