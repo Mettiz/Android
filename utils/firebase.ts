@@ -224,12 +224,90 @@ export const isStandaloneAndroidRuntime = (): boolean => {
   );
 };
 
+export const CUSTOM_SYNC_URL_STORAGE_KEY = 'shiftflow_custom_sync_url';
+export const DEFAULT_VERCEL_SYNC_URL = 'https://android-fmd-shift-flow.vercel.app';
+
 export const REMOTE_SERVER_URLS = [
+  DEFAULT_VERCEL_SYNC_URL,
   'https://ais-pre-fekwj6ooulu4tv6actzru2-10710985351.us-west2.run.app',
   'https://ais-dev-fekwj6ooulu4tv6actzru2-10710985351.us-west2.run.app',
 ];
 
+export function getCustomServerUrl(): string {
+  if (typeof window === 'undefined') return DEFAULT_VERCEL_SYNC_URL;
+  try {
+    const custom = localStorage.getItem(CUSTOM_SYNC_URL_STORAGE_KEY);
+    if (custom !== null) {
+      return custom.trim().replace(/\/+$/, '');
+    }
+    // Check Vite environment variable if configured during build
+    const envUrl = (import.meta as any).env?.VITE_VERCEL_SYNC_URL;
+    if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
+      return envUrl.trim().replace(/\/+$/, '');
+    }
+  } catch {}
+  return DEFAULT_VERCEL_SYNC_URL;
+}
+
+export function setCustomServerUrl(url: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const cleaned = url ? url.trim().replace(/\/+$/, '') : '';
+    localStorage.setItem(CUSTOM_SYNC_URL_STORAGE_KEY, cleaned);
+  } catch {}
+}
+
+export function getActiveServerUrls(): string[] {
+  const urls: string[] = [];
+  const custom = getCustomServerUrl();
+  if (custom) {
+    urls.push(custom);
+  }
+  for (const url of REMOTE_SERVER_URLS) {
+    if (!urls.includes(url)) {
+      urls.push(url);
+    }
+  }
+  return urls;
+}
+
+export async function testServerUrlConnection(rawUrl: string): Promise<{ success: boolean; message: string; latency?: number }> {
+  const cleanUrl = rawUrl.trim().replace(/\/+$/, '');
+  if (!cleanUrl) {
+    return { success: false, message: 'آدرس سرور وارد نشده است.' };
+  }
+  const startTime = Date.now();
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+    const res = await fetch(`${cleanUrl}/api/sync?action=health&_t=${Date.now()}`, {
+      signal: controller.signal,
+      cache: 'no-store'
+    });
+    clearTimeout(timeout);
+    const latency = Date.now() - startTime;
+    if (res.ok) {
+      return {
+        success: true,
+        message: `اتصال به ورسل موفقیت‌آمیز بود (${latency}ms) - آماده و بدون فیلتر در ایران`,
+        latency
+      };
+    }
+    return {
+      success: false,
+      message: `پاسخ از سرور دریافت شد ولی کد وضعیت ${res.status} بود.`
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `خطای برقراری ارتباط با سرور: ${err?.message || 'تایم‌اوت یا عدم دسترسی'}`
+    };
+  }
+}
+
 export function getSyncApiBase(): string {
+  const custom = getCustomServerUrl();
+  if (custom) return custom;
   if (isStandaloneAndroidRuntime()) {
     return REMOTE_SERVER_URLS[0];
   }
@@ -361,6 +439,7 @@ export function subscribeToCloudRoster(
 
   // 1. Immediate Direct Server API + Firestore fallback fetch
   const fetchFromEndpoints = async (): Promise<any> => {
+    const customUrl = getCustomServerUrl();
     if (!isNativeAndroid) {
       try {
         const res = await fetch(`/api/sync?_t=${Date.now()}`, { cache: 'no-store' });
@@ -369,9 +448,19 @@ export function subscribeToCloudRoster(
           return await res.json();
         }
       } catch {}
+
+      if (customUrl) {
+        try {
+          const res = await fetch(`${customUrl}/api/sync?_t=${Date.now()}`, { cache: 'no-store' });
+          const ct = res.headers.get('content-type') || '';
+          if (res.ok && ct.includes('application/json')) {
+            return await res.json();
+          }
+        } catch {}
+      }
     } else {
-      // For Standalone Android APK: try primary and dev server endpoints first
-      for (const base of REMOTE_SERVER_URLS) {
+      // For Standalone Android APK: try custom server (e.g. Vercel) and remote server endpoints
+      for (const base of getActiveServerUrls()) {
         try {
           const res = await fetch(`${base}/api/sync?_t=${Date.now()}`, { cache: 'no-store' });
           const ct = res.headers.get('content-type') || '';
@@ -596,6 +685,7 @@ export function subscribeToCloudRoster(
  */
 export async function fetchLatestCloudRosterNow(): Promise<CloudRosterState | null> {
   const isAndroid = isStandaloneAndroidRuntime();
+  const customUrl = getCustomServerUrl();
   if (!isAndroid) {
     try {
       const res = await fetch(`/api/sync?_t=${Date.now()}`, { cache: 'no-store' });
@@ -606,8 +696,20 @@ export async function fetchLatestCloudRosterNow(): Promise<CloudRosterState | nu
         }
       }
     } catch {}
+
+    if (customUrl) {
+      try {
+        const res = await fetch(`${customUrl}/api/sync?_t=${Date.now()}`, { cache: 'no-store' });
+        if (res.ok) {
+          const json = await res.json();
+          if (json?.exists && json?.data) {
+            return json.data as CloudRosterState;
+          }
+        }
+      } catch {}
+    }
   } else {
-    for (const base of REMOTE_SERVER_URLS) {
+    for (const base of getActiveServerUrls()) {
       try {
         const res = await fetch(`${base}/api/sync?_t=${Date.now()}`, { cache: 'no-store' });
         const ct = res.headers.get('content-type') || '';
@@ -650,7 +752,7 @@ function cleanFirestoreData<T>(obj: T): T {
  * Saves or updates roster data with Dual Sync across BOTH Web Browser and Native Android App:
  * 1. Updates in-memory schedule fingerprint & broadcasts to same-browser tabs immediately.
  * 2. Writes directly to Firestore (works 100% on Android APK https://localhost & Web).
- * 3. POSTs to Direct Server API (/api/sync on Web, and remote Cloud Run endpoints on Android APK).
+ * 3. POSTs to Direct Server API (/api/sync on Web, and remote Cloud Run / Vercel endpoints on Android APK).
  */
 export async function saveCloudRoster(data: Partial<CloudRosterState>): Promise<void> {
   const now = new Date().toISOString();
@@ -691,9 +793,16 @@ export async function saveCloudRoster(data: Partial<CloudRosterState>): Promise<
 
   // 3. Direct Server Sync POST
   const isAndroid = isStandaloneAndroidRuntime();
-  const targetUrls = isAndroid
-    ? REMOTE_SERVER_URLS.map((base) => `${base}/api/sync`)
-    : ['/api/sync'];
+  const customUrl = getCustomServerUrl();
+  const targetUrls: string[] = [];
+  if (isAndroid) {
+    targetUrls.push(...getActiveServerUrls().map((base) => `${base}/api/sync`));
+  } else {
+    targetUrls.push('/api/sync');
+    if (customUrl) {
+      targetUrls.push(`${customUrl}/api/sync`);
+    }
+  }
 
   for (const url of targetUrls) {
     writePromises.push(
@@ -746,9 +855,16 @@ export async function resetCloudRoster(data: CloudRosterState): Promise<void> {
   }
 
   const isAndroid = isStandaloneAndroidRuntime();
-  const targetUrls = isAndroid
-    ? REMOTE_SERVER_URLS.map((base) => `${base}/api/sync/reset`)
-    : ['/api/sync/reset'];
+  const customUrl = getCustomServerUrl();
+  const targetUrls: string[] = [];
+  if (isAndroid) {
+    targetUrls.push(...getActiveServerUrls().map((base) => `${base}/api/sync/reset`));
+  } else {
+    targetUrls.push('/api/sync/reset');
+    if (customUrl) {
+      targetUrls.push(`${customUrl}/api/sync/reset`);
+    }
+  }
 
   await Promise.allSettled(
     targetUrls.map((url) =>

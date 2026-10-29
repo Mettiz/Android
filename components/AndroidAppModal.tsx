@@ -29,11 +29,19 @@ import {
   Coffee,
   ShieldCheck,
   ChevronDown,
+  Globe,
+  RefreshCw,
+  Radio,
 } from 'lucide-react';
 import { useOnlineStatus } from '../utils/usePWAInstall';
 import { ShiftEntry, Personnel, DailyProcessMap } from '../types';
 import { toPersianDigits } from '../utils/persianDate';
 import { getPersonColor } from '../utils/personnelColors';
+import {
+  getCustomServerUrl,
+  setCustomServerUrl,
+  testServerUrlConnection,
+} from '../utils/firebase';
 import {
   UserAndroidSettings,
   ShiftNotificationItem,
@@ -341,12 +349,48 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
     return typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
   });
   const [isPersonDropdownOpen, setIsPersonDropdownOpen] = useState(false);
+  const [vercelServerUrl, setVercelServerUrl] = useState(() => getCustomServerUrl());
+  const [isTestingServer, setIsTestingServer] = useState(false);
+  const [serverTestResult, setServerTestResult] = useState<{
+    success: boolean;
+    message: string;
+    latency?: number;
+  } | null>(null);
 
   const prevScheduleRef = useRef<ShiftEntry[] | null>(null);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 3500);
+  };
+
+  const handleTestServer = async () => {
+    const target = vercelServerUrl.trim() || (typeof window !== 'undefined' ? window.location.origin : '');
+    if (!target) {
+      showToast('لطفاً آدرس سرور ورسل را وارد کنید.');
+      return;
+    }
+    setIsTestingServer(true);
+    setServerTestResult(null);
+    try {
+      const res = await testServerUrlConnection(target);
+      setIsTestingServer(false);
+      setServerTestResult(res);
+      if (res.success) {
+        showToast(`اتصال برقرار شد (${res.latency || 0}ms)`);
+      }
+    } catch (err: any) {
+      setIsTestingServer(false);
+      setServerTestResult({
+        success: false,
+        message: err?.message || 'خطای اتصال به سرور',
+      });
+    }
+  };
+
+  const handleSaveServerUrl = () => {
+    setCustomServerUrl(vercelServerUrl);
+    showToast(vercelServerUrl.trim() ? 'آدرس سرور ورسل ذخیره شد.' : 'سرور به حالت پیش‌فرض بازگشت.');
   };
 
   const updateSettings = (patch: Partial<UserAndroidSettings>) => {
@@ -1741,6 +1785,127 @@ export const UserSettingsButton: React.FC<UserSettingsButtonProps> = ({
                       >
                         {settings.highContrastMode ? 'فعال (درشت‌نمایی)' : 'استاندارد'}
                       </button>
+                    </div>
+
+                    {/* 7. Vercel Anti-Filter Server Relay */}
+                    <div className="border border-emerald-300/80 bg-linear-to-b from-emerald-50/70 to-teal-50/30 rounded-2xl p-4 space-y-3">
+                      <div className="flex items-start gap-3">
+                        <div className="p-2.5 rounded-xl bg-emerald-600 text-white shrink-0 shadow-2xs">
+                          <Globe className="w-5 h-5" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-xs sm:text-sm font-black text-emerald-950">
+                              ۷. اتصال به سرور Vercel (بدون نیاز به فیلترشکن در ایران)
+                            </h4>
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-100/90 px-2 py-0.5 rounded-full">
+                              <Radio className="w-3 h-3 animate-pulse text-emerald-600" />
+                              ضد تحریم و فیلتر
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                            سرور Vercel در داخل ایران فیلتر نیست و به عنوان واسط پرسرعت به دیتابیس متصل می‌شود تا تمام تغییرات شیفت و نوتیفیکیشن‌ها برای مدیر و تمام پرسنل بدون وصل بودن فیلترشکن همگام‌سازی شوند.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Server URL Input & Quick Actions */}
+                      <div className="bg-white border border-emerald-200/90 rounded-xl p-3 space-y-2.5 shadow-2xs">
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                          <div className="relative flex-1">
+                            <input
+                              type="url"
+                              value={vercelServerUrl}
+                              onChange={(e) => setVercelServerUrl(e.target.value)}
+                              placeholder="https://android-fmd-shift-flow.vercel.app"
+                              className="w-full text-xs font-mono px-3 py-2.5 rounded-lg border border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none dir-ltr text-slate-800 placeholder:text-slate-400"
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={handleTestServer}
+                              disabled={isTestingServer}
+                              className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold transition cursor-pointer disabled:opacity-50"
+                              title="بررسی پینگ و برقراری ارتباط با سرور"
+                            >
+                              <RefreshCw className={`w-3.5 h-3.5 ${isTestingServer ? 'animate-spin' : ''}`} />
+                              <span>{isTestingServer ? 'در حال تست...' : 'تست اتصال'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={handleSaveServerUrl}
+                              className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1 px-3.5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition cursor-pointer shadow-2xs"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>ذخیره</span>
+                            </button>
+
+                            {vercelServerUrl !== 'https://android-fmd-shift-flow.vercel.app' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const defUrl = 'https://android-fmd-shift-flow.vercel.app';
+                                  setVercelServerUrl(defUrl);
+                                  setCustomServerUrl(defUrl);
+                                  setServerTestResult(null);
+                                  showToast('آدرس سرور به سرور رسمی ورسل بازگردانده شد.');
+                                }}
+                                className="p-2.5 rounded-lg text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 transition cursor-pointer"
+                                title="بازگشت به سرور پیش‌فرض ورسل"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Test Status Banner */}
+                        {serverTestResult && (
+                          <div
+                            className={`flex items-start gap-2 p-2 rounded-lg text-xs font-medium border ${
+                              serverTestResult.success
+                                ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                                : 'bg-rose-50 border-rose-300 text-rose-800'
+                            }`}
+                          >
+                            {serverTestResult.success ? (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                            ) : (
+                              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                            )}
+                            <div className="flex-1">
+                              <span>{serverTestResult.message}</span>
+                              {serverTestResult.latency && (
+                                <span className="block text-[11px] font-mono mt-0.5 text-emerald-700">
+                                  پینگ سرور ورسل: {serverTestResult.latency} میلی‌ثانیه
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Active Server Info */}
+                        <div className="text-[11px] text-slate-600 bg-emerald-50/60 border border-emerald-200/80 rounded-lg p-2.5 leading-relaxed flex items-center justify-between gap-2 flex-wrap">
+                          <div>
+                            <strong className="text-emerald-900">سرور پیش‌فرض فعال:</strong>{' '}
+                            <a
+                              href="https://android-fmd-shift-flow.vercel.app"
+                              target="_blank"
+                              rel="noreferrer"
+                              className="font-mono text-emerald-700 font-bold underline dir-ltr inline-flex items-center gap-0.5"
+                            >
+                              https://android-fmd-shift-flow.vercel.app
+                              <ExternalLink className="w-2.5 h-2.5 inline" />
+                            </a>
+                          </div>
+                          <span className="text-[10px] font-bold text-emerald-800 bg-white px-2 py-0.5 rounded border border-emerald-200">
+                            متصل به دیتابیس ابری بدون نیاز به فیلترشکن
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}

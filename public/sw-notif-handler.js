@@ -57,12 +57,30 @@ if (typeof caches !== 'undefined') {
     .catch(() => {});
 }
 
+const VERCEL_RELAY_URL = 'https://android-fmd-shift-flow.vercel.app';
+
+async function fetchSyncPayload() {
+  const endpoints = ['/api/sync?_t=' + Date.now(), VERCEL_RELAY_URL + '/api/sync?_t=' + Date.now()];
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (res && res.ok) {
+        const json = await res.json();
+        if (json && json.exists && json.data && Array.isArray(json.data.schedule)) {
+          return json;
+        }
+      }
+    } catch (e) {
+      // Try next endpoint
+    }
+  }
+  return null;
+}
+
 async function checkServerScheduleInBackground() {
   if (!BG_STATE.notifyOnShiftChange) return;
   try {
-    const res = await fetch('/api/sync?_t=' + Date.now(), { cache: 'no-store' });
-    if (!res.ok) return;
-    const json = await res.json();
+    const json = await fetchSyncPayload();
     if (!json || !json.exists || !json.data || !Array.isArray(json.data.schedule)) return;
 
     const newUpdatedAt = json.data.updatedAt || '';
